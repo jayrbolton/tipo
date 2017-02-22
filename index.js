@@ -1,6 +1,8 @@
 const R = require('ramda')
 const acorn = require('acorn')
 const walk = require('acorn/dist/walk')
+const fs = require('fs')
+const printType = require('./lib/print-type')
 
 // A type is an object with the format:
 // {
@@ -8,28 +10,34 @@ const walk = require('acorn/dist/walk')
 // , params: [[OtherType1, OtherType2], OtherType3]
 // }
 
-// Convert type to a string
-const printType = (t) => {
-  if(typeof t === 'string') return t
-  if(t.length !== undefined) return '[' + R.join(', ', R.map(printType, t)) + ']'
-  const params = R.join(", ",  R.map(printType, t.params || []))
-  return t.name + '(' + params + ')'
-}
 // Print an array of error messages into something readable-ish
-const printErrs = errs => {
-  return R.join(
-    "\n"
-  , R.map(
-      err => `Type error [${err.node.start}:${err.node.end}]: ${err.message}`
-    , errs)
-  )
-}
+const printErrs = R.compose(
+  R.join("\n")
+, R.map(err => `Type error [${err.node.start}:${err.node.end}]: ${err.message}`)
+)
 
 // Create a type object
 const createType = (name, params) => {
   return {
     name: name
   , params: params || []
+  , _isType: true
+  }
+}
+
+// All builtin types yikes!
+const defaultBindings = () => ({
+  module: createType('Object', [{exports: createType('Object', ['a'])}])
+, require: createType('Function', [['String'], 'a'])
+})
+
+// Create a state object
+const createState = () => {
+  return {
+    bindings: defaultBindings() // A mapping of variable names to Types that we have discovered/inferred
+  , scopes: {} // Nested lexical scopes, such as function bodies
+  , errors: [] // Any type errors that we find on the journey
+  , meta: {tvar: 'a'} // Misc metadata to be used as we traverse the AST to keep track of stuff
   }
 }
 
@@ -103,6 +111,7 @@ const replaceTypes = state => (a, b) => {
   }
 }
 
+
 // Our acorn dictionary of visitor functions for every type of node we want to type-check
 const visitors = {
   Identifier: (node, state, c) => {
@@ -131,7 +140,7 @@ const visitors = {
 , FunctionDeclaration: (node, state, c) => {
     // Function assignment and definition
     const name = node.id.name
-    var funcState = {meta: {body: node.body, tvar: 'a', params: []}, bindings: {}, errors: []}
+    var funcState = R.merge(createState(), {meta: {body: node.body, tvar: 'a', params: []}})
     state.scopes[name] = funcState
     // Bind all parameters to open types -- mutates funcState
     R.map(bindParam(funcState), node.params)
@@ -150,10 +159,25 @@ const visitors = {
     state.bindings.return = state.meta.currentType
     delete state.meta.currentType
   }
- 
+
 , CallExpression: (node, state, c) => {
     // Function call
     const name = node.callee.name
+    if(name === 'require') {
+      // TODO Load another file and check it
+      const fileState = createState()
+      if(!node.arguments.length || node.arguments[0].type !== 'Literal' || !node.arguments[0].value) {
+        state.errors.push[{message: 'Invalid require; argument should be a string file-path', node}]
+        return
+      }
+      const path = node.arguments[0].value
+      const fullpath = /\.(js|json)$/.test(path) ? path : path + '.js'
+      const contents = fs.readFileSync(fullpath, 'utf8')
+      const result = checkWithState(contents, fileState)
+      console.log({fileState})
+      console.log({result})
+      return
+    }
     const type = state.bindings[name]
     // Functions must be defined in the current scope
     if(!type) {
@@ -179,13 +203,12 @@ const visitors = {
       state.errors.push({message: "Invalid function arguments", node})
       return
     }
-    // Create a copy of the function-scoped state 
+    // Create a copy of the function-scoped state
     // so that we can bind the argument types to the params
     const typedScope = R.clone(scope)
     R.map(R.apply(replaceTypes(typedScope)), typePairs)
     // Re-evaluate the function body using the parameter types bound to arg types
     c(scope.meta.body, typedScope)
-    console.log({typedScope})
     // Finally, the return type of the typedScode is now our currentType
     state.meta.currentType = typedScope.bindings.return
     delete typedScope
@@ -199,32 +222,86 @@ const visitors = {
     var rightType = state.meta.currentType
     delete state.meta.currentType
     if(node.operator === '+') {
-      if(isTvar(leftType) || isTvar(rightType)) {
+      if(leftType === 'String' || rightType === 'String') {
+        state.meta.currentType = 'String'
+      } else if(isTvar(leftType) || isTvar(rightType)) {
         state.meta.currentType = state.meta.tvar
         state.meta.tvar = nextChar(state.meta.tvar)
       } else if(leftType === 'Number' && rightType === 'Number') {
         state.meta.currentType = 'Number'
-      } else if(leftType === 'String' || rightType === 'String') {
-        state.meta.currentType = 'String'
       } else {
         state.errors.push({node, message: 'Invalid types for "+" operator'})
       }
     }
   }
+
+, ArrayExpression: (node, state, c) => {
+    const elemTypes = []
+    R.map(
+      elem => {
+        c(elem, state)
+        elemTypes.push(state.meta.currentType)
+        delete state.meta.currentType
+      }
+    , node.elements
+    )
+    const type = createType('Array', [elemTypes])
+    state.meta.currentType = type
+  }
+
+, ObjectExpression: (node, state, c) => {
+    const objTypes = {}
+    R.map(
+      prop => {
+        c(prop, state)
+        objTypes[prop.key.name] = state.meta.currentType
+        delete state.meta.currentType
+      }
+    , node.properties
+    )
+    const type = createType('Object', [objTypes])
+    state.meta.currentType = type
+  }
+
+, MemberExpression: (node, state, c) => {
+    const objType = state.bindings[node.object.name]
+    const prop = node.property.name
+    if(!objType) {
+      state.errors.push({ message: "Undefined object", node })
+      return
+    }
+
+    if(objType.params[0] && objType.params[0][prop]) {
+      const type = objType.params[0][prop]
+      state.meta.currentType = type
+      return
+    }
+  }
+
+, AssignmentExpression: (node, state, c) => {
+    // Get type of right-hand expression
+    c(node.right, state)
+    const type = state.meta.currentType
+    delete state.meta.currentType
+    if(node.left.type === "MemberExpression") {
+      const objName = node.left.object.name
+      const propName = node.left.property.name
+      const objType = state.bindings[node.left.object.name]
+      const param = objType.params[0]
+      param[propName] = type
+    }
+  }
 }
 
 
-const check = program => {
+const check = program => checkWithState(program, createState())
+
+const checkWithState = (program, state) => {
   var parsed = acorn.parse(program, {})
-  var state = {
-    bindings: {} // A mapping of variable names to Types that we have discovered/inferred
-  , scopes: {} // Nested lexical scopes, such as function bodies
-  , errors: [] // Any type errors that we find on the journey
-  , meta: {tvar: 'a'} // Misc metadata to be used as we traverse the AST to keep track of stuff
-  }
   walk.recursive(parsed, state, visitors, walk.base)
-  console.log("Bindings: ", state.bindings)
-  console.log("Errors: ", state.errors)
+  // console.log("Bindings: ", state.bindings)
+  // console.log("Errors: ", state.errors)
+  // console.log("Scopes: ", state.scopes)
   return state
 }
 

@@ -1,1 +1,1 @@
-var z = 1
+module.exports = 1
