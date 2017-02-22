@@ -1,14 +1,12 @@
+//npm
 const R = require('ramda')
 const acorn = require('acorn')
 const walk = require('acorn/dist/walk')
 const fs = require('fs')
+//local
 const printType = require('./lib/print-type')
+const replaceTypes = require('./lib/replace-types')
 
-// A type is an object with the format:
-// {
-//   name: TypeName
-// , params: [[OtherType1, OtherType2], OtherType3]
-// }
 
 // Print an array of error messages into something readable-ish
 const printErrs = R.compose(
@@ -38,6 +36,7 @@ const createState = () => {
   , scopes: {} // Nested lexical scopes, such as function bodies
   , errors: [] // Any type errors that we find on the journey
   , meta: {tvar: 'a'} // Misc metadata to be used as we traverse the AST to keep track of stuff
+  , types: {}
   }
 }
 
@@ -83,11 +82,11 @@ const bindIdentifier = (node, state) => {
   }
 }
 
-// See if type 'a' can match type 'b'
+// See if one type can matche with another
 // Returns Boolean
 // (Number, a) -> Number
 // (a, Number) -> null
-// (Array(Number), Array(a)) -> Array(Number)
+// (Array([Number]), Array([a])) -> Array([Number])
 const matchTypes = (a, b) => {
   if(isTvar(b) || a === b) return a
   if(a.name !== b.name) return null
@@ -99,17 +98,6 @@ const matchTypes = (a, b) => {
 const isTvar = (a) => typeof a === 'string' && /^[a-z]$/.test(a)
 // For incrementing type variables, which are single alphabet letters
 const nextChar = (c) => String.fromCharCode(c.charCodeAt() + 1)
-
-
-// In the given bindings, replace all instances of type 'b' with type 'a'
-// Mutates state
-const replaceTypes = state => (a, b) => {
-  var bindings = state.bindings
-  for(const name in bindings) {
-    const type = bindings[name]
-    if(type === b) bindings[name] = a
-  }
-}
 
 
 // Our acorn dictionary of visitor functions for every type of node we want to type-check
@@ -132,6 +120,12 @@ const visitors = {
 , VariableDeclarator: (node, state, c) => {
     // Variable assignment
     c(node.init, state)
+    if(state.bindings[node.id.name]) {
+      if(!matchTypes(state.bindings[node.id.name], state.meta.currentType)) {
+        state.errors.push({message: `Type ${printType(state.meta.currentType)} does not match ${printType(state.bindings[node.id.name])}`, node})
+        return
+      }
+    }
     state.bindings[node.id.name] = state.meta.currentType
     delete state.meta.currentType
     return node.type
@@ -164,7 +158,7 @@ const visitors = {
     // Function call
     const name = node.callee.name
     if(name === 'require') {
-      // TODO Load another file and check it
+      // Load another file and check it
       const fileState = createState()
       if(!node.arguments.length || node.arguments[0].type !== 'Literal' || !node.arguments[0].value) {
         state.errors.push[{message: 'Invalid require; argument should be a string file-path', node}]
@@ -174,8 +168,8 @@ const visitors = {
       const fullpath = /\.(js|json)$/.test(path) ? path : path + '.js'
       const contents = fs.readFileSync(fullpath, 'utf8')
       const result = checkWithState(contents, fileState)
-      console.log({fileState})
-      console.log({result})
+      const exportType = fileState.bindings.module.params[0].exports
+      state.meta.currentType = exportType
       return
     }
     const type = state.bindings[name]
@@ -206,7 +200,7 @@ const visitors = {
     // Create a copy of the function-scoped state
     // so that we can bind the argument types to the params
     const typedScope = R.clone(scope)
-    R.map(R.apply(replaceTypes(typedScope)), typePairs)
+    R.map(R.apply(replaceTypes(typedScope.bindings)), typePairs)
     // Re-evaluate the function body using the parameter types bound to arg types
     c(scope.meta.body, typedScope)
     // Finally, the return type of the typedScode is now our currentType
@@ -299,10 +293,16 @@ const check = program => checkWithState(program, createState())
 const checkWithState = (program, state) => {
   var parsed = acorn.parse(program, {})
   walk.recursive(parsed, state, visitors, walk.base)
+  console.log(parsed.body)
   // console.log("Bindings: ", state.bindings)
   // console.log("Errors: ", state.errors)
   // console.log("Scopes: ", state.scopes)
   return state
 }
 
-module.exports = {check, printType, createType, printErrs}
+const loadDeclarations = (str) => {
+  const state = createState()
+  console.log({parsed})
+}
+
+module.exports = {check, printType, createType, printErrs, checkWithState, loadDeclarations, createState}

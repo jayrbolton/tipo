@@ -1,3 +1,4 @@
+const R = require('ramda')
 var test = require('tape')
 var tipo = require('../')
 
@@ -91,6 +92,20 @@ test("it infers object assignment", function(t) {
 test("it parses require statements", function(t) {
   const program = `var x = require('./test/wut.js')`
   const result = tipo.check(program)
+  t.strictEqual(tipo.printType(result.bindings.x), 'String')
+  t.end()
+})
+test("it allows you to set types explicitly", function(t) {
+  const Human = tipo.createType('Human', [{name: 'String', age: 'Number'}])
+  const binding = {x: Human}
+  const defaultState = tipo.createState()
+  const state = R.merge(defaultState, {
+    bindings: R.merge(defaultState.bindings, binding)
+  , types: R.merge(defaultState.types, {Human})
+  })
+  const program = `var x = {name: 15, age: "finn"}`
+  const result = tipo.checkWithState(program, state)
+  t.strictEqual(result.errors[0].message, "Type Object({name: Number, age: String}) does not match Human({name: String, age: Number})")
   t.end()
 })
 
@@ -99,6 +114,12 @@ test('it finds an error when a variable is assigned to an undefined variable', f
   var program = ` var x = y `
   var result = tipo.check(program)
   t.strictEqual(result.errors[0].message, 'Undefined variable')
+  t.end()
+})
+test("it finds an error for undefined function calls", function(t) {
+  var program = `what('hi')`
+  var result = tipo.check(program)
+  t.strictEqual(result.errors[0].message, 'Undefined function')
   t.end()
 })
 
