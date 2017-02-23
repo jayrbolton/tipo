@@ -24,15 +24,15 @@ const createType = (name, params) => {
 }
 
 // All builtin types yikes!
-const defaultBindings = () => ({
+const defaultBindings = {
   module: createType('Object', [{exports: createType('Object', ['a'])}])
 , require: createType('Function', [['String'], 'a'])
-})
+}
 
 // Create a state object
 const createState = () => {
   return {
-    bindings: defaultBindings() // A mapping of variable names to Types that we have discovered/inferred
+    bindings: Object.create(defaultBindings) // A mapping of variable names to Types that we have discovered/inferred
   , scopes: {} // Nested lexical scopes, such as function bodies
   , errors: [] // Any type errors that we find on the journey
   , meta: {tvar: 'a'} // Misc metadata to be used as we traverse the AST to keep track of stuff
@@ -134,7 +134,8 @@ const visitors = {
 , FunctionDeclaration: (node, state, c) => {
     // Function assignment and definition
     const name = node.id.name
-    var funcState = R.merge(createState(), {meta: {body: node.body, tvar: 'a', params: []}})
+    const funcBindings = Object.create(state.bindings)
+    const funcState = R.merge(state, {bindings: funcBindings, meta: {body: node.body, tvar: 'a', params: []}})
     state.scopes[name] = funcState
     // Bind all parameters to open types -- mutates funcState
     R.map(bindParam(funcState), node.params)
@@ -293,7 +294,7 @@ const check = program => checkWithState(program, createState())
 const checkWithState = (program, state) => {
   var parsed = acorn.parse(program, {})
   walk.recursive(parsed, state, visitors, walk.base)
-  console.log(parsed.body)
+  // console.log(parsed.body)
   // console.log("Bindings: ", state.bindings)
   // console.log("Errors: ", state.errors)
   // console.log("Scopes: ", state.scopes)

@@ -26,6 +26,13 @@ test('it infers the type of the identity function', function(t) {
   t.strictEqual(tipo.printType(result.bindings.id), 'Function([a], a)')
   t.end()
 })
+test('it allows you to use types from the surrounding lexical scope from within a function', function(t) {
+  var program = `var y = 'hi'; function fn(x) { return x + y } ; var z = fn(1)`
+  var result = tipo.check(program)
+  console.log(result.errors)
+  t.strictEqual(tipo.printType(result.bindings.z), 'String')
+  t.end()
+})
 test('it infers an identity function call', function(t) {
   var program = `function id(x) { return x }; var x = id(1)`
   var result = tipo.check(program)
@@ -122,4 +129,4 @@ test("it finds an error for undefined function calls", function(t) {
   t.strictEqual(result.errors[0].message, 'Undefined function')
   t.end()
 })
-
+ 
