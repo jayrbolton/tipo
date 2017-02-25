@@ -165,24 +165,37 @@ test("object inference on a parameter from a property reference", function(t) {
   t.strictEqual(tipo.printType(result.bindings.fn), "Function([Object({prop: b})], b)")
   t.end()
 })
-/*
-test.only("it infers for loops", function(t) { // TODO refine test name
-  const program = `
-    var x = 1
-    for(var y = 0; ++y; y < 10) {
-      x += "hi"
-    }
-  `
-  const result = tipo.check(program)
-  console.log(result)
+test("it infers binary operator results to be Number types", function(t) {
+  const ops = ['/', '*', '-', '%', '**']
+  ops.map(function(op) {
+    const result = tipo.check(`var x = 1 ${op} 1`)
+    t.strictEqual(result.bindings.x, 'Number')
+  })
   t.end()
 })
-*/
-// TODO while loops
+test("it infers tvars to be Number types when they are in the arguments of a Number binary operator", function(t) {
+  const op = '/'
+  const program = `function fn(x, y) { return x ${op} y}`
+  const result = tipo.check(program)
+  t.deepEqual(tipo.printType(result.bindings.fn), "Function([Number, Number], Number)")
+  t.end()
+})
+// TODO unary negation
+// TODO unary plus
+// TODO ternary conditional
 // TODO conditionals
+// TODO for loops
+// TODO while loops
+// TODO const
+// TODO arrow functions
+// TODO prefill types for all globals!!!
+//     https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects
 // TODO prototypes, this, new, methods
 // TODO type variables with a rewriting system (eg Supporter -> Object)
 // TODO strict/closed object types (no assignment, no extra properties)
+// TODO crawl files in a directory and type-check all
+// TODO fix require relative path resolution
+// TODO require on node_modules (can use require.resolve?)
 
 // Inferences with type errors
 test('it finds an error when a variable is assigned to an undefined variable', function(t) {
@@ -201,27 +214,29 @@ test("it finds an error when trying to call a non-function", function(t) {
   t.end()
 })
 test("it finds an error when calling a function with the wrong type argument", function(t) {
-  const program = `var incr = function(n) { return n + 1 }; incr('hi')`
-  const Incr = tipo.createType('Function', [['Number'], 'Number'])
-  const bindings = {incr: Incr}
-  const defaultState = tipo.createState()
-  const state = R.merge(defaultState, {
-    bindings: R.merge(defaultState.bindings, bindings)
-  , types: R.merge(defaultState.types, {Incr})
-  })
-  t.throws(()=> tipo.checkWithState(program, state), TypeMatchError)
+  const program = `
+    //type incr : Function([Number], Number)
+    var incr = function(n) { return n + 1 }
+    incr('hi')
+  `
+  t.throws(()=> tipo.check(program), TypeMatchError)
+  t.end()
+})
+test("a var bound to an explicit object gets matched correctly", function(t) {
+  const program = `
+    //type x : Object({name: String, age: Number})
+    var x = {name: "Finn", age: 16}
+  `
+  const result = tipo.check(program)
+  t.strictEqual(tipo.printType(result.bindings.x), 'Object({name: String, age: Number})')
   t.end()
 })
 test("a var bound to an explicit object type throws an error when the var's type does not match the given type", function(t) {
-  const Human = tipo.createType('Object', [{name: 'String', age: 'Number'}])
-  const bindings = {x: Human}
-  const defaultState = tipo.createState()
-  const state = R.merge(defaultState, {
-    bindings: R.merge(defaultState.bindings, bindings)
-  , types: R.merge(defaultState.types, {Human})
-  })
-  const program = `var x = {name: 15, age: "finn"}`
-  t.throws(()=> tipo.checkWithState(program, state), TypeMatchError)
+  const program = `
+    //type x : Object({name: String, age: Number})
+    var x = {name: 15, age: "finn"}
+  `
+  t.throws(()=> tipo.check(program), TypeMatchError)
   t.end()
 })
 test("Doing ++ on a string throws a type error", function(t) {
@@ -229,4 +244,43 @@ test("Doing ++ on a string throws a type error", function(t) {
   t.throws(() => tipo.check(program), TypeMatchError)
   t.end()
 })
-// TODO cannot += on an undefined var
+test("it throws an error when assigning to an undeclared variable", function(t) {
+  const program = `x = 1`
+  t.throws(() => tipo.check(program), TypeMatchError)
+  t.end()
+})
+test("it throws an error when += on an undefined var", function (t) {
+  const program = `x += 1`
+  t.throws(() => tipo.check(program), TypeMatchError)
+  t.end()
+})
+test("Passing in an object with a property of the wrong type to a function that references that property throws a type error", function(t) {
+  const program = `function fn(x) { return x.prop * 2 }; var x = fn({prop: 'hi'})`
+  t.throws(()=> tipo.check(program), TypeMatchError)
+  t.end()
+})
+test("it throws an error when binary operator are given non-Number arguments", function(t) {
+  const ops = ['/', '*', '-', '%', '**']
+  ops.map(function(op) {
+    t.throws(() => tipo.check(`var x = 1 ${op} 'hi'`), TypeMatchError)
+  })
+  t.end()
+})
+
+
+
+// -- TODO organize this
+test("comment experiments within program", function(t) {
+  const program = `
+    //type add : Function([Number, Number], Number)
+    var add = function(x, y) { return x + y }
+    var x = add('hi', 'there')
+  `
+  t.throws(() => tipo.check(program), TypeMatchError)
+  t.end()
+})
+test("comment experiments within require", function(t) {
+  const program = `var add = require('./test/annotated'); add('hi', 'there')`
+  t.throws(()=> tipo.check(program), TypeMatchError)
+  t.end()
+})

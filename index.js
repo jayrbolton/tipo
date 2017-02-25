@@ -1,15 +1,15 @@
 //npm
+const fs = require('fs')
 const R = require('ramda')
 const acorn = require('acorn')
 const walk = require('acorn/dist/walk')
-const fs = require('fs')
 //local
 const printType = require('./lib/print-type')
-const replaceTypes = require('./lib/replace-types')
 const TypeMatchError = require('./lib/errors/type-match-error')
 const matchTypes = require("./lib/match-types")
 const isTvar = require("./lib/is-tvar")
 const createType = require("./lib/create-type")
+const parseType = require('./lib/parse-type')
 
 // Print an array of error messages into something readable-ish
 const printErrs = R.compose(
@@ -19,14 +19,14 @@ const printErrs = R.compose(
 
 // All builtin types yikes!
 const defaultBindings = {
-  module: createType('Object', [{exports: createType('Object', ['a'])}])
+  module: createType('Object', [{exports: 'a'}])
 , require: createType('Function', [['String'], 'a'])
 }
 
 // Create a state object
 const createState = () => {
   return {
-    bindings: Object.create(defaultBindings) // A mapping of variable names to Types that we have discovered/inferred
+    bindings: defaultBindings // A mapping of variable names to Types that we have discovered/inferred
   , errors: [] // Any type errors that we find on the journey
   , meta: {tvar: 'a'} // Misc metadata to be used as we traverse the AST to keep track of stuff
   , types: {}
@@ -66,6 +66,21 @@ const incrTVar = state => {
   return tvar
 }
 
+const getFunctionType = (node, state, c) => {
+  // Function assignment and definition
+  const funcBindings = R.clone(state.bindings)
+  const funcState = R.merge(state, {bindings: funcBindings, meta: {body: node.body, tvar: 'a', params: []}})
+  R.map(bindParam(funcState), node.params)
+  c(node.body, funcState)
+  if(funcState.errors.length) {
+    state.errors = state.errors.concat(funcState.errors)
+    return
+  }
+  const paramTypes = R.map(name => funcState.bindings[name], funcState.meta.params)
+  const returnType = funcState.bindings.return
+  return createType("Function", [paramTypes, returnType], funcState)
+}
+
 
 // Our acorn dictionary of visitor functions for every type of node we want to type-check
 const visitors = {
@@ -81,53 +96,25 @@ const visitors = {
 , Literal: (node, state, c) => {
     // A primitive value; always inferable
     state.meta.currentType = getLiteralType(node)
-    return node.type
   }
 
 , VariableDeclarator: (node, state, c) => {
     // Variable assignment
     const rtype = getType(node.init, state, c)
     const name = node.id.name
-    if(state.bindings[name]) {
-      state.bindings[name] = matchTypes(node, state.bindings[node.id.name], rtype)
-    } else {
-      state.bindings[name] = rtype
-    }
-    return node.type
+    const existing = state.bindings[name]
+    state.bindings[name] = existing ? matchTypes(node, existing, rtype) : rtype
   }
 
 , FunctionExpression: (node, state, c) => {
-    // An anonymous function expression
-    const funcBindings = Object.create(state.bindings)
-    const funcState = R.merge(state, {bindings: funcBindings, meta: {body: node.body, tvar: 'a', params: []}})
-    R.map(bindParam(funcState), node.params)
-    c(node.body, funcState)
-    if(funcState.errors.length) {
-      state.errors = state.errors.concat(funcState.errors)
-      return
-    }
-    const paramTypes = R.map(name => funcState.bindings[name], funcState.meta.params)
-    state.meta.currentType = createType('Function', [paramTypes, funcState.bindings.return], funcState)
+    const type = getFunctionType(node, state, c)
+    state.meta.currentType = type
   }
 
 , FunctionDeclaration: (node, state, c) => {
-    // Function assignment and definition
-    const name = node.id.name
-    const funcBindings = Object.create(state.bindings)
-    const funcState = R.merge(state, {
-      bindings: funcBindings
-    , meta: {body: node.body, tvar: 'a', params: []}
-    })
-    // Bind all parameters to open types -- mutates funcState
-    R.map(bindParam(funcState), node.params)
-    // Traverse the function body with the scoped state
-    c(node.body, funcState)
-    if(funcState.errors.length) {
-      state.errors = state.errors.concat(funcState.errors)
-      return
-    }
-    const paramTypes = R.map(name => funcState.bindings[name], funcState.meta.params)
-    state.bindings[name] = createType('Function', [paramTypes, funcState.bindings.return], funcState)
+    const funcType = getFunctionType(node, state, c)
+    const existing = state.bindings[node.id.name]
+    state.bindings[node.id.name] = existing ? matchTypes(node, existing, funcType) : funcType
   }
 
 , ReturnStatement: (node, state, c) => {
@@ -140,26 +127,24 @@ const visitors = {
     // Function call
     if(node.callee.name === 'require') {
       // Load another file and check it
-      const fileState = createState()
       if(!node.arguments.length || node.arguments[0].type !== 'Literal' || !node.arguments[0].value) {
         throw new TypeMatchError("Invalid require; argument should be a string file-path", node)
         return
       }
-      const path = node.arguments[0].value
-      const fullpath = /\.(js|json)$/.test(path) ? path : path + '.js'
-      const contents = fs.readFileSync(fullpath, 'utf8')
-      const result = checkWithState(contents, fileState)
-      const exportType = fileState.bindings.module.params[0].exports
+      const path = require.resolve(node.arguments[0].value)
+      const contents = fs.readFileSync(path, 'utf8')
+      const result = check(contents)
+      const exportType = result.bindings.module.params[0].exports
       state.meta.currentType = exportType
       return
     }
     // Infer the type of function being called
-    const type = getType(node.callee, state, c)
+    const funcType = getType(node.callee, state, c)
     // Functions must be defined in the current scope
-    if(!type) {
+    if(!funcType) {
       throw new TypeMatchError("Function call on undefined type", node)
       return
-    } else if(type.name !== 'Function') {
+    } else if(funcType.name !== 'Function') {
       throw new TypeMatchError("Function call on a non-function type", node)
       return
     }
@@ -168,17 +153,19 @@ const visitors = {
       arg => getType(arg, state, c)
     , node.arguments
     )
+    // const argBindings = R.fromPairs(R.zip(funcType.scope.meta.params, argTypes))
     // Create an array of pairs of [argumentType, paramType]
     // eg [['Number', 'a'], ['String', 'b']]
-    const typePairs = R.zip(argTypes, type.params[0])
+    const typePairs = R.zip(argTypes, funcType.params[0])
     // If any argument types do not match parameter types, throw an err
     const matched = R.map(R.apply(matchTypes(node)), typePairs)
+    const matchedBindings = R.fromPairs(R.zip(funcType.scope.meta.params, matched))
     // Create a copy of the function-scoped state
     // so that we can bind the argument types to the params
-    const typedScope = R.clone(type.scope)
-    R.map(R.apply(replaceTypes(typedScope.bindings)), typePairs)
+    const typedScope = R.clone(funcType.scope)
+    typedScope.bindings = R.merge(typedScope.bindings, matchedBindings)
     // Re-evaluate the function body using the parameter types bound to arg types
-    c(type.scope.meta.body, typedScope)
+    c(funcType.scope.meta.body, typedScope)
     // Finally, the return type of the typedScode is now our currentType
     state.meta.currentType = typedScope.bindings.return
     delete typedScope
@@ -197,6 +184,20 @@ const visitors = {
         state.meta.currentType = 'Number'
       } else {
         throw new TypeMatchError("Invalid types for '+' operator", node)
+      }
+    } else {
+      // if(isTvar(ltype) && node.left.type === 'Identifier') {
+     // }
+      if((ltype === 'Number' || isTvar(ltype)) && (rtype === 'Number' || isTvar(rtype))) {
+        state.meta.currentType = 'Number'
+      } else {
+        throw new TypeMatchError(`Operands for '${node.operator}' operator must be Numbers`, node)
+      }
+      if(isTvar(ltype) && node.left.type === 'Identifier') {
+        state.bindings[node.left.name] = 'Number'
+      }
+      if(isTvar(rtype) && node.right.type === 'Identifier') {
+        state.bindings[node.right.name] = 'Number'
       }
     }
   }
@@ -233,11 +234,11 @@ const visitors = {
 
 , MemberExpression: (node, state, c) => {
     const objType = state.bindings[node.object.name]
-    const prop = node.property.name
     if(!objType) {
-      throw new TypeMatchError("Undefined object", node)
+      throw new TypeMatchError(`Undefined object type for #{node.object.name}`, node)
       return
     }
+    const prop = node.property.name
 
     // If we are referencing a property on a type variable,
     // infer that the type is actually an object with a property
@@ -261,7 +262,7 @@ const visitors = {
     var rtype = getType(node.right, state, c)
     const ltype = getType(node.left, state, c)
     // Handle non-regular, mutating assignment, like +=, -=, >>=, etc, etc
-    if(node.operator === '+=' && ltype !== 'Number' || rtype !== 'Number') {
+    if(node.operator === '+=' && (ltype !== 'Number' || rtype !== 'Number')) {
       // The only case where += returns a number type is if both ltype and rtype are Numbers
       rtype = 'String' // Eg if x = 1 and you do x += {x: 1}, the result is a String :p
     }
@@ -297,21 +298,31 @@ const visitors = {
 }
 
 
-const check = program => checkWithState(program, createState())
-
-const checkWithState = (program, state) => {
-  const parsed = acorn.parse(program, {})
+const check = (program, bindings={}) => {
+  var state = createState()
+  state.bindings = R.merge(state.bindings, bindings)
+  const comments = []
+  const parsed = acorn.parse(program, { onComment: onComment(comments) })
+  const commentTypes = R.fromPairs(R.map(([ident, type, start, end]) => [ident, parseType(type)], comments))
+  state.bindings = R.merge(state.bindings, commentTypes)
   walk.recursive(parsed, state, visitors, walk.base)
-  // console.log(parsed.body[1])
+  // console.log(parsed.body)
   // console.log("Bindings: ", state.bindings)
   // console.log("Errors: ", state.errors)
   // console.log("Scopes: ", state.scopes)
   return state
 }
 
-const loadDeclarations = (str) => {
-  const state = createState()
-  // console.log({parsed})
+const onComment = comments => (block, text, start, end) => {
+  if(/^\s*type/.test(text)) {
+    const [lhs, rhs] = text.split(/:(.+)/)
+    if(!lhs || !rhs) {
+      throw new Error(`Invalid type signature syntax in ${text}`)
+    }
+    const ident = lhs.replace('type', '').trim()
+    const type = rhs.trim()
+    comments.push([ident, type, start, end])
+  }
 }
 
-module.exports = {check, printType, createType, printErrs, checkWithState, loadDeclarations, createState}
+module.exports = {check, printType, createType, printErrs, createState}
