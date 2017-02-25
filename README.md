@@ -9,7 +9,7 @@ Current status:
 _Example_
 
 ```js
-//T add : Function([Number, Number], Number)
+//type add : Function([Number, Number], Number)
 function add(x, y) {
   return  x + y
 }
@@ -29,7 +29,7 @@ _Example code that raises type errors_
 ```js
 var x = 'hi' * y // ERROR
 
-//T incr : Function([Number], Number)
+//type incr : Function([Number], Number)
 function add(x, y) {return x + 1}
 
 incr('hi') // ERROR
@@ -38,8 +38,8 @@ var obj = {x: "hi"}
 
 incr(obj.x) // ERROR
 
-//T Human = Object({name: String, age: String})
-//T x : Human
+//type Human = Object({name: String, age: String})
+//type x : Human
 var x = {name: 45, age: "Bob"} // ERROR
 ```
 

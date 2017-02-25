@@ -29,7 +29,6 @@ const createState = () => {
     bindings: defaultBindings // A mapping of variable names to Types that we have discovered/inferred
   , errors: [] // Any type errors that we find on the journey
   , meta: {tvar: 'a'} // Misc metadata to be used as we traverse the AST to keep track of stuff
-  , types: {}
   }
 }
 
@@ -301,10 +300,8 @@ const visitors = {
 const check = (program, bindings={}) => {
   var state = createState()
   state.bindings = R.merge(state.bindings, bindings)
-  const comments = []
-  const parsed = acorn.parse(program, { onComment: onComment(comments) })
-  const commentTypes = R.fromPairs(R.map(([ident, type, start, end]) => [ident, parseType(type)], comments))
-  state.bindings = R.merge(state.bindings, commentTypes)
+  // onComment mutates state.bindings, adding bindings and type aliases from the comments
+  const parsed = acorn.parse(program, {onComment: onComment(state.bindings, {})})
   walk.recursive(parsed, state, visitors, walk.base)
   // console.log(parsed.body)
   // console.log("Bindings: ", state.bindings)
@@ -313,16 +310,27 @@ const check = (program, bindings={}) => {
   return state
 }
 
-const onComment = comments => (block, text, start, end) => {
+const onComment = (bindings, aliases) => (block, text, start, end) => {
   if(/^\s*type/.test(text)) {
-    const [lhs, rhs] = text.split(/:(.+)/)
+    var exprType, lhs, rhs
+    if(/^.+=.+$/.test(text)) {
+      [lhs, rhs] = text.split(/=(.+)/)
+      exprType = 'alias'
+    } else if(/^.+:.+$/.test(text)) {
+      [lhs, rhs] = text.split(/:(.+)/)
+      exprType = 'binding'
+    }
     if(!lhs || !rhs) {
       throw new Error(`Invalid type signature syntax in ${text}`)
     }
     const ident = lhs.replace('type', '').trim()
-    const type = rhs.trim()
-    comments.push([ident, type, start, end])
+    const type = parseType(rhs.trim())
+    if(exprType === 'binding') {
+      bindings[ident] = aliases[type] || type
+    } else if(exprType === 'alias') {
+      aliases[ident] = type
+    }
   }
 }
 
-module.exports = {check, printType, createType, printErrs, createState}
+module.exports = {check, printType, createType}

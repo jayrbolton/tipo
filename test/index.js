@@ -272,7 +272,8 @@ test("it throws an error when binary operator are given non-Number arguments", f
 // -- TODO organize this
 test("comment experiments within program", function(t) {
   const program = `
-    //type add : Function([Number, Number], Number)
+    // type Add = Function([Number, Number], Number)
+    // type add : Add
     var add = function(x, y) { return x + y }
     var x = add('hi', 'there')
   `
@@ -282,5 +283,15 @@ test("comment experiments within program", function(t) {
 test("comment experiments within require", function(t) {
   const program = `var add = require('./test/annotated'); add('hi', 'there')`
   t.throws(()=> tipo.check(program), TypeMatchError)
+  t.end()
+})
+test("comment type aliasing", function(t) {
+  const program = `
+    //type Human = Object({name: String, age: Number})
+    //type x : Human
+    var x = {name: "Bob", age: 12}
+  `
+  const result = tipo.check(program)
+  t.strictEqual(tipo.printType(result.bindings.x), 'Object({name: String, age: Number})')
   t.end()
 })
