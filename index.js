@@ -54,14 +54,17 @@ const getLiteralType = (node) => {
 // Save a special meta array of param types so we know what types are in what order
 const bindParam = state => node => {
   // Bind an identifier to an open type variable if declared from the params
-  const tvar = state.meta.tvar
-  state.meta.tvar = nextChar(state.meta.tvar)
+  const tvar = incrTVar(state)
   state.bindings[node.name] = tvar
-  state.meta.params.push(tvar)
+  state.meta.params.push(node.name)
 }
 
-// For incrementing type variables, which are single alphabet letters
-const nextChar = (c) => String.fromCharCode(c.charCodeAt() + 1)
+// For incrementing type variables, which are lowercase characters starting with 'a'
+const incrTVar = state => {
+  const tvar = state.meta.tvar
+  state.meta.tvar = String.fromCharCode(tvar.charCodeAt() + 1)
+  return tvar
+}
 
 
 // Our acorn dictionary of visitor functions for every type of node we want to type-check
@@ -103,7 +106,8 @@ const visitors = {
       state.errors = state.errors.concat(funcState.errors)
       return
     }
-    state.meta.currentType = createType('Function', [funcState.meta.params, funcState.bindings.return], funcState)
+    const paramTypes = R.map(name => funcState.bindings[name], funcState.meta.params)
+    state.meta.currentType = createType('Function', [paramTypes, funcState.bindings.return], funcState)
   }
 
 , FunctionDeclaration: (node, state, c) => {
@@ -122,7 +126,8 @@ const visitors = {
       state.errors = state.errors.concat(funcState.errors)
       return
     }
-    state.bindings[name] = createType('Function', [funcState.meta.params, funcState.bindings.return], funcState)
+    const paramTypes = R.map(name => funcState.bindings[name], funcState.meta.params)
+    state.bindings[name] = createType('Function', [paramTypes, funcState.bindings.return], funcState)
   }
 
 , ReturnStatement: (node, state, c) => {
@@ -186,8 +191,8 @@ const visitors = {
       if(ltype === 'String' || rtype === 'String') {
         state.meta.currentType = 'String'
       } else if(isTvar(ltype) || isTvar(rtype)) {
-        state.meta.currentType = state.meta.tvar
-        state.meta.tvar = nextChar(state.meta.tvar)
+        const tvar = incrTVar(state)
+        state.meta.currentType = tvar
       } else if(ltype === 'Number' && rtype === 'Number') {
         state.meta.currentType = 'Number'
       } else {
@@ -231,6 +236,15 @@ const visitors = {
     const prop = node.property.name
     if(!objType) {
       throw new TypeMatchError("Undefined object", node)
+      return
+    }
+
+    // If we are referencing a property on a type variable,
+    // infer that the type is actually an object with a property
+    if(isTvar(objType)) {
+      const tvar = incrTVar(state)
+      state.bindings[node.object.name] = createType('Object', [{[node.property.name]: tvar}])
+      state.meta.currentType = tvar
       return
     }
 

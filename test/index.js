@@ -159,6 +159,12 @@ test("doing += with two object types yields a String type :p", function(t) {
   t.strictEqual(tipo.printType(result.bindings.x), "Any([Object({}), String])")
   t.end()
 })
+test("object inference on a parameter from a property reference", function(t) {
+  const program = `function fn(x) { return x.prop }`
+  const result = tipo.check(program)
+  t.strictEqual(tipo.printType(result.bindings.fn), "Function([Object({prop: b})], b)")
+  t.end()
+})
 /*
 test.only("it infers for loops", function(t) { // TODO refine test name
   const program = `
@@ -176,6 +182,7 @@ test.only("it infers for loops", function(t) { // TODO refine test name
 // TODO conditionals
 // TODO prototypes, this, new, methods
 // TODO type variables with a rewriting system (eg Supporter -> Object)
+// TODO strict/closed object types (no assignment, no extra properties)
 
 // Inferences with type errors
 test('it finds an error when a variable is assigned to an undefined variable', function(t) {
