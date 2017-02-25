@@ -15,11 +15,12 @@ const printErrs = R.compose(
 )
 
 // Create a type object
-const createType = (name, params) => {
+const createType = (name, params, scope=null) => {
   return {
     name: name
   , params: params || []
   , _isType: true
+  , scope // nested type state
   }
 }
 
@@ -33,7 +34,6 @@ const defaultBindings = {
 const createState = () => {
   return {
     bindings: Object.create(defaultBindings) // A mapping of variable names to Types that we have discovered/inferred
-  , scopes: {} // Nested lexical scopes, such as function bodies
   , errors: [] // Any type errors that we find on the journey
   , meta: {tvar: 'a'} // Misc metadata to be used as we traverse the AST to keep track of stuff
   , types: {}
@@ -50,13 +50,6 @@ const getLiteralType = (node) => {
   }
 }
 
-// Bind a function call type's parameters and return type
-const bindFunction = (node, state, funcState) => {
-  const paramTypes = R.values(funcState.meta.paramBindings)
-  const returnType = funcState.bindings.return
-  state.bindings[node.id.name] = createType('Function', [paramTypes, returnType])
-}
-
 // Bind all parameters for a function definition to open types
 // Save a special meta array of param types so we know what types are in what order
 const bindParam = state => node => {
@@ -65,21 +58,6 @@ const bindParam = state => node => {
   state.meta.tvar = nextChar(state.meta.tvar)
   state.bindings[node.name] = tvar
   state.meta.params.push(tvar)
-}
-
-// Set the type of an Identifier node, depending on the context in which it is declared
-const bindIdentifier = (node, state) => {
-  const name = node.name
-  if(state.meta.status === 'assigning') {
-    // Bind an identifier to the value in an assignment
-    if(state.bindings[name]) {
-      // Assigning one variable to another
-      state.bindings[state.meta.assignee] = state.bindings[name]
-    } else {
-      // Error assigning to an undefined variable
-      state.errors.push({ message: "Undefined variable", node})
-    }
-  }
 }
 
 // See if one type can matche with another
@@ -105,7 +83,7 @@ const visitors = {
   Identifier: (node, state, c) => {
     if(!state.bindings[node.name]) {
       // Identifiers must be defined
-      state.errors.push({message: "Undefined variable" , node })
+      state.errors.push({message: `Undefined identifier '${node.name}'` , node })
       return
     }
     state.meta.currentType = state.bindings[node.name]
@@ -131,12 +109,27 @@ const visitors = {
     return node.type
   }
 
+, FunctionExpression: (node, state, c) => {
+    // An anonymous function expression
+    const funcBindings = Object.create(state.bindings)
+    const funcState = R.merge(state, {bindings: funcBindings, meta: {body: node.body, tvar: 'a', params: []}})
+    R.map(bindParam(funcState), node.params)
+    c(node.body, funcState)
+    if(funcState.errors.length) {
+      state.errors = state.errors.concat(funcState.errors)
+      return
+    }
+    state.meta.currentType = createType('Function', [funcState.meta.params, funcState.bindings.return], funcState)
+  }
+
 , FunctionDeclaration: (node, state, c) => {
     // Function assignment and definition
     const name = node.id.name
     const funcBindings = Object.create(state.bindings)
-    const funcState = R.merge(state, {bindings: funcBindings, meta: {body: node.body, tvar: 'a', params: []}})
-    state.scopes[name] = funcState
+    const funcState = R.merge(state, {
+      bindings: funcBindings
+    , meta: {body: node.body, tvar: 'a', params: []}
+    })
     // Bind all parameters to open types -- mutates funcState
     R.map(bindParam(funcState), node.params)
     // Traverse the function body with the scoped state
@@ -145,7 +138,7 @@ const visitors = {
       state.errors = state.errors.concat(funcState.errors)
       return
     }
-    state.bindings[name] = createType('Function', [funcState.meta.params, funcState.bindings.return])
+    state.bindings[name] = createType('Function', [funcState.meta.params, funcState.bindings.return], funcState)
   }
 
 , ReturnStatement: (node, state, c) => {
@@ -157,8 +150,7 @@ const visitors = {
 
 , CallExpression: (node, state, c) => {
     // Function call
-    const name = node.callee.name
-    if(name === 'require') {
+    if(node.callee.name === 'require') {
       // Load another file and check it
       const fileState = createState()
       if(!node.arguments.length || node.arguments[0].type !== 'Literal' || !node.arguments[0].value) {
@@ -173,20 +165,22 @@ const visitors = {
       state.meta.currentType = exportType
       return
     }
-    const type = state.bindings[name]
+    c(node.callee, state)
+    const type = state.meta.currentType
+    delete state.meta.currentType
     // Functions must be defined in the current scope
     if(!type) {
-      state.errors.push({message: "Undefined function", node})
+      state.errors.push({message: "Function call on undefined type", node})
       return
     }
-    var scope = state.scopes[name]
+    const scope = type.scope
     // Get the types for each argument
-    var argTypes = []
-    R.map(
+    const argTypes = R.map(
       arg => {
         c(arg, state)
-        argTypes.push(state.meta.currentType)
+        var t = state.meta.currentType
         delete state.meta.currentType
+        return t
       }
     , node.arguments
     )
@@ -303,7 +297,7 @@ const checkWithState = (program, state) => {
 
 const loadDeclarations = (str) => {
   const state = createState()
-  console.log({parsed})
+  // console.log({parsed})
 }
 
 module.exports = {check, printType, createType, printErrs, checkWithState, loadDeclarations, createState}

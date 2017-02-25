@@ -29,7 +29,7 @@ test('it infers the type of the identity function', function(t) {
 test('it allows you to use types from the surrounding lexical scope from within a function', function(t) {
   var program = `var y = 'hi'; function fn(x) { return x + y } ; var z = fn(1)`
   var result = tipo.check(program)
-  console.log(result.errors)
+  // console.log(result.errors)
   t.strictEqual(tipo.printType(result.bindings.z), 'String')
   t.end()
 })
@@ -115,18 +115,36 @@ test("it allows you to set types explicitly", function(t) {
   t.strictEqual(result.errors[0].message, "Type Object({name: Number, age: String}) does not match Human({name: String, age: Number})")
   t.end()
 })
+test("it can infer anonymous function types", function(t) {
+  const program = `var id = function(x) { return x }`
+  const result = tipo.check(program)
+  t.strictEqual(tipo.printType(result.bindings.id), "Function([a], a)")
+  t.end()
+})
+test("it infers types of functions that return functions", function(t) {
+  const program = `var fn = function(x) { return function() { return x}}`
+  const result = tipo.check(program)
+  t.strictEqual(tipo.printType(result.bindings.fn), "Function([a], Function([], a))")
+  t.end()
+})
+test("it infers double calls on the same function", function(t) {
+  const program = `var fn = function(x) { return function() { return x}}; var x = fn(1)()`
+  const result = tipo.check(program)
+  // console.log(result.bindings)
+  t.strictEqual(tipo.printType(result.bindings.x), "Number")
+  t.end()
+})
 
 // Inferences with type errors
 test('it finds an error when a variable is assigned to an undefined variable', function(t) {
   var program = ` var x = y `
   var result = tipo.check(program)
-  t.strictEqual(result.errors[0].message, 'Undefined variable')
+  t.strictEqual(result.errors[0].message, "Undefined identifier 'y'")
   t.end()
 })
 test("it finds an error for undefined function calls", function(t) {
   var program = `what('hi')`
   var result = tipo.check(program)
-  t.strictEqual(result.errors[0].message, 'Undefined function')
+  t.strictEqual(result.errors[0].message, "Undefined identifier 'what'")
   t.end()
 })
- 
