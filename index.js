@@ -6,23 +6,16 @@ const fs = require('fs')
 //local
 const printType = require('./lib/print-type')
 const replaceTypes = require('./lib/replace-types')
-
+const TypeMatchError = require('./lib/errors/type-match-error')
+const matchTypes = require("./lib/match-types")
+const isTvar = require("./lib/is-tvar")
+const createType = require("./lib/create-type")
 
 // Print an array of error messages into something readable-ish
 const printErrs = R.compose(
   R.join("\n")
 , R.map(err => `Type error [${err.node.start}:${err.node.end}]: ${err.message}`)
 )
-
-// Create a type object
-const createType = (name, params, scope=null) => {
-  return {
-    name: name
-  , params: params || []
-  , _isType: true
-  , scope // nested type state
-  }
-}
 
 // All builtin types yikes!
 const defaultBindings = {
@@ -60,20 +53,6 @@ const bindParam = state => node => {
   state.meta.params.push(tvar)
 }
 
-// See if one type can matche with another
-// Returns Boolean
-// (Number, a) -> Number
-// (a, Number) -> null
-// (Array([Number]), Array([a])) -> Array([Number])
-const matchTypes = (a, b) => {
-  if(isTvar(b) || a === b) return a
-  if(a.name !== b.name) return null
-  // TODO type match all params in a and all params in b, pair-wise
-}
-
-// Is it a type variable?
-// Returns Boolean
-const isTvar = (a) => typeof a === 'string' && /^[a-z]$/.test(a)
 // For incrementing type variables, which are single alphabet letters
 const nextChar = (c) => String.fromCharCode(c.charCodeAt() + 1)
 
@@ -83,7 +62,7 @@ const visitors = {
   Identifier: (node, state, c) => {
     if(!state.bindings[node.name]) {
       // Identifiers must be defined
-      state.errors.push({message: `Undefined identifier '${node.name}'` , node })
+      throw new TypeMatchError(`Undefined identifier '${node.name}'`, node)
       return
     }
     state.meta.currentType = state.bindings[node.name]
@@ -99,10 +78,7 @@ const visitors = {
     // Variable assignment
     c(node.init, state)
     if(state.bindings[node.id.name]) {
-      if(!matchTypes(state.bindings[node.id.name], state.meta.currentType)) {
-        state.errors.push({message: `Type ${printType(state.meta.currentType)} does not match ${printType(state.bindings[node.id.name])}`, node})
-        return
-      }
+      state.meta.currentType = matchTypes(node, state.bindings[node.id.name], state.meta.currentType)
     }
     state.bindings[node.id.name] = state.meta.currentType
     delete state.meta.currentType
@@ -154,7 +130,7 @@ const visitors = {
       // Load another file and check it
       const fileState = createState()
       if(!node.arguments.length || node.arguments[0].type !== 'Literal' || !node.arguments[0].value) {
-        state.errors.push[{message: 'Invalid require; argument should be a string file-path', node}]
+        throw new TypeMatchError("Invalid require; argument should be a string file-path", node)
         return
       }
       const path = node.arguments[0].value
@@ -165,15 +141,18 @@ const visitors = {
       state.meta.currentType = exportType
       return
     }
+    // Infer the type of function being called
     c(node.callee, state)
     const type = state.meta.currentType
     delete state.meta.currentType
     // Functions must be defined in the current scope
     if(!type) {
-      state.errors.push({message: "Function call on undefined type", node})
+      throw new TypeMatchError("Function call on undefined type", node)
+      return
+    } else if(type.name !== 'Function') {
+      throw new TypeMatchError("Function call on a non-function type", node)
       return
     }
-    const scope = type.scope
     // Get the types for each argument
     const argTypes = R.map(
       arg => {
@@ -186,18 +165,15 @@ const visitors = {
     )
     // Create an array of pairs of [argumentType, paramType]
     // eg [['Number', 'a'], ['String', 'b']]
-    const typePairs = R.zip(argTypes, scope.meta.params)
-    // If any argument types do not match parameter types, push an err
-    if(!R.all(R.map(R.apply(matchTypes), typePairs))) {
-      state.errors.push({message: "Invalid function arguments", node})
-      return
-    }
+    const typePairs = R.zip(argTypes, type.params[0])
+    // If any argument types do not match parameter types, throw an err
+    const matched = R.map(R.apply(matchTypes(node)), typePairs)
     // Create a copy of the function-scoped state
     // so that we can bind the argument types to the params
-    const typedScope = R.clone(scope)
+    const typedScope = R.clone(type.scope)
     R.map(R.apply(replaceTypes(typedScope.bindings)), typePairs)
     // Re-evaluate the function body using the parameter types bound to arg types
-    c(scope.meta.body, typedScope)
+    c(type.scope.meta.body, typedScope)
     // Finally, the return type of the typedScode is now our currentType
     state.meta.currentType = typedScope.bindings.return
     delete typedScope
@@ -219,7 +195,7 @@ const visitors = {
       } else if(leftType === 'Number' && rightType === 'Number') {
         state.meta.currentType = 'Number'
       } else {
-        state.errors.push({node, message: 'Invalid types for "+" operator'})
+        throw new TypeMatchError("Invalid types for '+' operator", node)
       }
     }
   }
@@ -256,7 +232,7 @@ const visitors = {
     const objType = state.bindings[node.object.name]
     const prop = node.property.name
     if(!objType) {
-      state.errors.push({ message: "Undefined object", node })
+      throw new TypeMatchError("Undefined object", node)
       return
     }
 
@@ -270,14 +246,31 @@ const visitors = {
 , AssignmentExpression: (node, state, c) => {
     // Get type of right-hand expression
     c(node.right, state)
-    const type = state.meta.currentType
+    const rtype = state.meta.currentType
     delete state.meta.currentType
     if(node.left.type === "MemberExpression") {
       const objName = node.left.object.name
       const propName = node.left.property.name
       const objType = state.bindings[node.left.object.name]
       const param = objType.params[0]
-      param[propName] = type
+      param[propName] = rtype
+    } else if(node.left.type === 'Identifier') {
+      c(node.left, state)
+      const ltype = state.meta.currentType
+      delete state.meta.currentType
+      if(!ltype) { 
+        throw new TypeMatchError("Assignment to undefined variable", node)
+        return
+      }
+      const existingType = state.bindings[node.left.name]
+      if(existingType) {
+        const typeParams = existingType.name === 'Any'
+          ? R.uniq(R.concat(existingType.params[0], [rtype]))
+          : [existingType, rtype]
+        state.bindings[node.left.name] = createType('Any', [typeParams])
+      } else {
+        state.bindings[node.left.name] = ltype
+      }
     }
   }
 }
@@ -286,9 +279,9 @@ const visitors = {
 const check = program => checkWithState(program, createState())
 
 const checkWithState = (program, state) => {
-  var parsed = acorn.parse(program, {})
+  const parsed = acorn.parse(program, {})
   walk.recursive(parsed, state, visitors, walk.base)
-  // console.log(parsed.body)
+  // console.log(parsed.body[1])
   // console.log("Bindings: ", state.bindings)
   // console.log("Errors: ", state.errors)
   // console.log("Scopes: ", state.scopes)

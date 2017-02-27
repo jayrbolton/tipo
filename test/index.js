@@ -1,6 +1,7 @@
 const R = require('ramda')
-var test = require('tape')
-var tipo = require('../')
+const test = require('tape')
+const tipo = require('../')
+const TypeMatchError = require("../lib/errors/type-match-error")
 
 test('printType prints a type!', function(t) {
   const typ = tipo.printType(tipo.createType('Xyz', ['Number', tipo.createType('Qqq', [])]))
@@ -54,13 +55,15 @@ test('it infers func def + assignment + operator', function(t) {
   t.strictEqual(result.bindings.x, 'String')
   t.end()
 })
-test("it infers stuff within a function", function(t) {
+test("integration of several basic inferences", function(t) {
   const program = `
     function hi(x) { 
       var hi = 'hi'
-      return 1 + x + hi
+      return function(y) { 
+        return y + x + hi
+      }
     }
-    var x = hi(1)
+    var x = hi(1)(2)
   `
   var result = tipo.check(program)
   t.strictEqual(result.bindings.x, 'String')
@@ -102,19 +105,6 @@ test("it parses require statements", function(t) {
   t.strictEqual(tipo.printType(result.bindings.x), 'String')
   t.end()
 })
-test("it allows you to set types explicitly", function(t) {
-  const Human = tipo.createType('Human', [{name: 'String', age: 'Number'}])
-  const binding = {x: Human}
-  const defaultState = tipo.createState()
-  const state = R.merge(defaultState, {
-    bindings: R.merge(defaultState.bindings, binding)
-  , types: R.merge(defaultState.types, {Human})
-  })
-  const program = `var x = {name: 15, age: "finn"}`
-  const result = tipo.checkWithState(program, state)
-  t.strictEqual(result.errors[0].message, "Type Object({name: Number, age: String}) does not match Human({name: String, age: Number})")
-  t.end()
-})
 test("it can infer anonymous function types", function(t) {
   const program = `var id = function(x) { return x }`
   const result = tipo.check(program)
@@ -134,17 +124,68 @@ test("it infers double calls on the same function", function(t) {
   t.strictEqual(tipo.printType(result.bindings.x), "Number")
   t.end()
 })
+test("it allows for partial application", function(t) {
+  const program = `var fn = function(x) { return function(){ return x }}; var fn1 = fn(1); var x = fn1()`
+  const result = tipo.check(program)
+  t.strictEqual(tipo.printType(result.bindings.fn1), "Function([], Number)")
+  t.strictEqual(result.bindings.x, "Number")
+  t.end()
+})
+test("it infers function within object properties", function(t) {
+  const program = `var obj = {fn: function(x) { return x }}; obj.y = obj.fn(2)`
+  const result = tipo.check(program)
+  t.strictEqual(tipo.printType(result.bindings.obj), 'Object({fn: Function([a], a), y: Number})')
+  t.end()
+})
+test("it assigns the types of variables whose types change", function(t) {
+  const program = `var x = 1; x = 'hi'; x = 2`
+  const result = tipo.check(program)
+  t.strictEqual(tipo.printType(result.bindings.x), 'Any([Number, String])')
+  t.end()
+})
+// TODO for loops
+// TODO while loops
+// TODO conditionals
+// TODO prototypes, this, new, methods
+// TODO type variables with a rewriting system (eg Supporter -> Object)
 
 // Inferences with type errors
 test('it finds an error when a variable is assigned to an undefined variable', function(t) {
   var program = ` var x = y `
-  var result = tipo.check(program)
-  t.strictEqual(result.errors[0].message, "Undefined identifier 'y'")
+  t.throws(()=> tipo.check(program), TypeMatchError)
   t.end()
 })
 test("it finds an error for undefined function calls", function(t) {
   var program = `what('hi')`
-  var result = tipo.check(program)
-  t.strictEqual(result.errors[0].message, "Undefined identifier 'what'")
+  t.throws(()=> tipo.check(program), TypeMatchError)
+  t.end()
+})
+test("it finds an error when trying to call a non-function", function(t) {
+  var program = `var x = 1; x(2)`
+  t.throws(()=> tipo.check(program), TypeMatchError)
+  t.end()
+})
+test("it finds an error when calling a function with the wrong type argument", function(t) {
+  const program = `var incr = function(n) { return n + 1 }; incr('hi')`
+  const Incr = tipo.createType('Function', [['Number'], 'Number'])
+  const bindings = {incr: Incr}
+  const defaultState = tipo.createState()
+  const state = R.merge(defaultState, {
+    bindings: R.merge(defaultState.bindings, bindings)
+  , types: R.merge(defaultState.types, {Incr})
+  })
+  t.throws(()=> tipo.checkWithState(program, state), TypeMatchError)
+  t.end()
+})
+test("a var bound to an explicit object type throws an error when the var's type does not match the given type", function(t) {
+  const Human = tipo.createType('Object', [{name: 'String', age: 'Number'}])
+  const bindings = {x: Human}
+  const defaultState = tipo.createState()
+  const state = R.merge(defaultState, {
+    bindings: R.merge(defaultState.bindings, bindings)
+  , types: R.merge(defaultState.types, {Human})
+  })
+  const program = `var x = {name: 15, age: "finn"}`
+  t.throws(()=> tipo.checkWithState(program, state), TypeMatchError)
   t.end()
 })
