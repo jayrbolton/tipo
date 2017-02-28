@@ -33,6 +33,13 @@ const createState = () => {
   }
 }
 
+const getType = (node, state, c) => {
+  c(node, state)
+  const t = state.meta.currentType 
+  delete state.meta.currentType
+  return t
+}
+
 // Get the type of a primitive literal value
 const getLiteralType = (node) => {
   const v = node.value
@@ -76,12 +83,13 @@ const visitors = {
 
 , VariableDeclarator: (node, state, c) => {
     // Variable assignment
-    c(node.init, state)
-    if(state.bindings[node.id.name]) {
-      state.meta.currentType = matchTypes(node, state.bindings[node.id.name], state.meta.currentType)
+    const rtype = getType(node.init, state, c)
+    const name = node.id.name
+    if(state.bindings[name]) {
+      state.bindings[name] = matchTypes(node, state.bindings[node.id.name], rtype)
+    } else {
+      state.bindings[name] = rtype
     }
-    state.bindings[node.id.name] = state.meta.currentType
-    delete state.meta.currentType
     return node.type
   }
 
@@ -119,9 +127,8 @@ const visitors = {
 
 , ReturnStatement: (node, state, c) => {
     // Evaluate the return expression to get its type, which will be saved to state.meta.currentType
-    c(node.argument, state)
+    state.meta.currentType = getType(node.argument, state, c)
     state.bindings.return = state.meta.currentType
-    delete state.meta.currentType
   }
 
 , CallExpression: (node, state, c) => {
@@ -142,9 +149,7 @@ const visitors = {
       return
     }
     // Infer the type of function being called
-    c(node.callee, state)
-    const type = state.meta.currentType
-    delete state.meta.currentType
+    const type = getType(node.callee, state, c)
     // Functions must be defined in the current scope
     if(!type) {
       throw new TypeMatchError("Function call on undefined type", node)
@@ -155,12 +160,7 @@ const visitors = {
     }
     // Get the types for each argument
     const argTypes = R.map(
-      arg => {
-        c(arg, state)
-        var t = state.meta.currentType
-        delete state.meta.currentType
-        return t
-      }
+      arg => getType(arg, state, c)
     , node.arguments
     )
     // Create an array of pairs of [argumentType, paramType]
@@ -180,19 +180,15 @@ const visitors = {
   }
 
 , BinaryExpression: (node, state, c) => {
-    c(node.left, state)
-    var leftType = state.meta.currentType
-    delete state.meta.currentType
-    c(node.right, state)
-    var rightType = state.meta.currentType
-    delete state.meta.currentType
+    const ltype = getType(node.left, state, c)
+    const rtype = getType(node.right, state, c)
     if(node.operator === '+') {
-      if(leftType === 'String' || rightType === 'String') {
+      if(ltype === 'String' || rtype === 'String') {
         state.meta.currentType = 'String'
-      } else if(isTvar(leftType) || isTvar(rightType)) {
+      } else if(isTvar(ltype) || isTvar(rtype)) {
         state.meta.currentType = state.meta.tvar
         state.meta.tvar = nextChar(state.meta.tvar)
-      } else if(leftType === 'Number' && rightType === 'Number') {
+      } else if(ltype === 'Number' && rtype === 'Number') {
         state.meta.currentType = 'Number'
       } else {
         throw new TypeMatchError("Invalid types for '+' operator", node)
@@ -203,9 +199,7 @@ const visitors = {
 , UpdateExpression: (node, state, c) => {
     // Infer the type for a unary updater thing, like ++x, --x, x++, x--
     // Get the type of the argument
-    c(node.argument, state)
-    const type = state.meta.currentType
-    delete state.meta.currentType
+    const type = getType(node.argument, state, c)
     if((node.operator === '++' || node.operator === '--') && type === 'Number') {
       state.meta.currentType = 'Number'
     } else {
@@ -214,13 +208,8 @@ const visitors = {
   }
 
 , ArrayExpression: (node, state, c) => {
-    const elemTypes = []
-    R.map(
-      elem => {
-        c(elem, state)
-        elemTypes.push(state.meta.currentType)
-        delete state.meta.currentType
-      }
+    const elemTypes = R.map(
+      elem => getType(elem, state, c)
     , node.elements
     )
     const type = createType('Array', [elemTypes])
@@ -228,13 +217,9 @@ const visitors = {
   }
 
 , ObjectExpression: (node, state, c) => {
-    const objTypes = {}
-    R.map(
-      prop => {
-        c(prop, state)
-        objTypes[prop.key.name] = state.meta.currentType
-        delete state.meta.currentType
-      }
+    const objTypes = R.reduce(
+      (acc, prop) => R.assoc(prop.key.name, getType(prop, state, c), acc)
+    , {}
     , node.properties
     )
     const type = createType('Object', [objTypes])
@@ -258,32 +243,41 @@ const visitors = {
 
 , AssignmentExpression: (node, state, c) => {
     // Get type of right-hand expression
-    c(node.right, state)
-    const rtype = state.meta.currentType
-    delete state.meta.currentType
+    // Get the type of the right side of the assignment
+    var rtype = getType(node.right, state, c)
+    const ltype = getType(node.left, state, c)
+    // Handle non-regular, mutating assignment, like +=, -=, >>=, etc, etc
+    if(node.operator === '+=' && ltype !== 'Number' || rtype !== 'Number') {
+      // The only case where += returns a number type is if both ltype and rtype are Numbers
+      rtype = 'String' // Eg if x = 1 and you do x += {x: 1}, the result is a String :p
+    }
+
+    // Handle object property assignment specially
     if(node.left.type === "MemberExpression") {
       const objName = node.left.object.name
       const propName = node.left.property.name
       const objType = state.bindings[node.left.object.name]
       const param = objType.params[0]
       param[propName] = rtype
-    } else if(node.left.type === 'Identifier') {
-      c(node.left, state)
-      const ltype = state.meta.currentType
-      delete state.meta.currentType
-      if(!ltype) { 
-        throw new TypeMatchError("Assignment to undefined variable", node)
-        return
-      }
-      const existingType = state.bindings[node.left.name]
-      if(existingType) {
-        const typeParams = existingType.name === 'Any'
-          ? R.uniq(R.concat(existingType.params[0], [rtype]))
-          : [existingType, rtype]
-        state.bindings[node.left.name] = createType('Any', [typeParams])
-      } else {
-        state.bindings[node.left.name] = ltype
-      }
+      return
+    } 
+    if(!ltype) { 
+      throw new TypeMatchError("Assignment to undefined variable", node)
+      return
+    }
+
+    if(node.operator !== '=' && node.operator !== '+=' && (rtype !== 'Number' || ltype !== 'Number')) {
+      // For all operators like -=, *=, /=, >>=, >>>=, ^=, etc, etc, both sides must be Numbers
+      throw new TypeMatchError(`For the operator ${node.operator}, both sides of the assignment must be type Number`, node)
+    }
+    const existingType = state.bindings[node.left.name]
+    if(existingType && existingType !== rtype) {
+      const typeParams = existingType.name === 'Any'
+        ? R.uniq(R.concat(existingType.params[0], [rtype]))
+        : [existingType, rtype]
+      state.bindings[node.left.name] = createType('Any', [typeParams])
+    } else {
+      state.bindings[node.left.name] = rtype
     }
   }
 }

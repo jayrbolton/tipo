@@ -30,7 +30,6 @@ test('it infers the type of the identity function', function(t) {
 test('it allows you to use types from the surrounding lexical scope from within a function', function(t) {
   var program = `var y = 'hi'; function fn(x) { return x + y } ; var z = fn(1)`
   var result = tipo.check(program)
-  // console.log(result.errors)
   t.strictEqual(tipo.printType(result.bindings.z), 'String')
   t.end()
 })
@@ -120,7 +119,6 @@ test("it infers types of functions that return functions", function(t) {
 test("it infers double calls on the same function", function(t) {
   const program = `var fn = function(x) { return function() { return x}}; var x = fn(1)()`
   const result = tipo.check(program)
-  // console.log(result.bindings)
   t.strictEqual(tipo.printType(result.bindings.x), "Number")
   t.end()
 })
@@ -149,15 +147,31 @@ test("it infers ++ and --", function(t) {
   t.strictEqual(tipo.printType(result.bindings.x), "Number")
   t.end()
 })
-test("it infers for loops", function(t) { // TODO refine test name
+test("it infers += and -=", function(t) {
+  const program = `var x = 1; x += 1; x -=1`
+  const result = tipo.check(program)
+  t.strictEqual(tipo.printType(result.bindings.x), "Number")
+  t.end()
+})
+test("doing += with two object types yields a String type :p", function(t) {
+  const program = `var x = {}; x += {}`
+  const result = tipo.check(program)
+  t.strictEqual(tipo.printType(result.bindings.x), "Any([Object({}), String])")
+  t.end()
+})
+/*
+test.only("it infers for loops", function(t) { // TODO refine test name
   const program = `
     var x = 1
     for(var y = 0; ++y; y < 10) {
       x += "hi"
     }
   `
+  const result = tipo.check(program)
+  console.log(result)
   t.end()
 })
+*/
 // TODO while loops
 // TODO conditionals
 // TODO prototypes, this, new, methods
@@ -208,3 +222,4 @@ test("Doing ++ on a string throws a type error", function(t) {
   t.throws(() => tipo.check(program), TypeMatchError)
   t.end()
 })
+// TODO cannot += on an undefined var
