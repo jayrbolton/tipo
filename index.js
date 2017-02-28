@@ -200,6 +200,19 @@ const visitors = {
     }
   }
 
+, UpdateExpression: (node, state, c) => {
+    // Infer the type for a unary updater thing, like ++x, --x, x++, x--
+    // Get the type of the argument
+    c(node.argument, state)
+    const type = state.meta.currentType
+    delete state.meta.currentType
+    if((node.operator === '++' || node.operator === '--') && type === 'Number') {
+      state.meta.currentType = 'Number'
+    } else {
+      throw new TypeMatchError(`Invalid type for '${node.operator}' operator: ${type}. This should be a Number`, node)
+    }
+  }
+
 , ArrayExpression: (node, state, c) => {
     const elemTypes = []
     R.map(

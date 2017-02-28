@@ -143,7 +143,21 @@ test("it assigns the types of variables whose types change", function(t) {
   t.strictEqual(tipo.printType(result.bindings.x), 'Any([Number, String])')
   t.end()
 })
-// TODO for loops
+test("it infers ++ and --", function(t) {
+  const program = `var x = 1; ++x; --x; x++; x--`
+  const result = tipo.check(program)
+  t.strictEqual(tipo.printType(result.bindings.x), "Number")
+  t.end()
+})
+test("it infers for loops", function(t) { // TODO refine test name
+  const program = `
+    var x = 1
+    for(var y = 0; ++y; y < 10) {
+      x += "hi"
+    }
+  `
+  t.end()
+})
 // TODO while loops
 // TODO conditionals
 // TODO prototypes, this, new, methods
@@ -187,5 +201,10 @@ test("a var bound to an explicit object type throws an error when the var's type
   })
   const program = `var x = {name: 15, age: "finn"}`
   t.throws(()=> tipo.checkWithState(program, state), TypeMatchError)
+  t.end()
+})
+test("Doing ++ on a string throws a type error", function(t) {
+  const program = `var x = 'hi'; var y = ++x`
+  t.throws(() => tipo.check(program), TypeMatchError)
   t.end()
 })
