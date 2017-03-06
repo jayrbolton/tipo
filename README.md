@@ -30,7 +30,7 @@ _Example code that raises type errors_
 var x = 'hi' * y // ERROR
 
 //type incr : Function([Number], Number)
-function add(x, y) {return x + 1}
+function incr(x) {return x + 1}
 
 incr('hi') // ERROR
 
@@ -41,6 +41,11 @@ incr(obj.x) // ERROR
 //type Human = Object({name: String, age: String})
 //type x : Human
 var x = {name: 45, age: "Bob"} // ERROR
+
+function fn(x, y, z) {
+  //type a : String
+  var a = x + y
+}
 ```
 
 
