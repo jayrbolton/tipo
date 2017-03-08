@@ -22,7 +22,7 @@ String
 Function([Number, Number], Number)
 
 // Object types can take an object-literal-formatted set of key names and types
-Object({name: string, age: Number})
+Object({name: String, age: Number})
 
 // You can alias one type as another with the '=' operator
 Human = Object({name: String, age: Number})
