@@ -2,12 +2,11 @@ const R = require('ramda')
 const test = require('tape')
 const tipo = require('../')
 const TypeMatchError = require("../lib/errors/type-match-error")
+require("./type-declarations")
+require("./print-type")
+require("./parse-type")
+//TODO parse type tests
 
-test('printType prints a type!', function(t) {
-  const typ = tipo.printType(tipo.createType('Xyz', ['Number', tipo.createType('Qqq', [])]))
-  t.strictEqual(typ, 'Xyz(Number, Qqq())')
-  t.end()
-})
 // Inference on correct programs
 test('it infers the type of a variable assignment to Number', function(t) {
   var program = ` var x = 1 `
@@ -135,12 +134,6 @@ test("it infers function within object properties", function(t) {
   t.strictEqual(tipo.printType(result.bindings.obj), 'Object({fn: Function([a], a), y: Number})')
   t.end()
 })
-test("it assigns the types of variables whose types change", function(t) {
-  const program = `var x = 1; x = 'hi'; x = 2`
-  const result = tipo.check(program)
-  t.strictEqual(tipo.printType(result.bindings.x), 'Any([Number, String])')
-  t.end()
-})
 test("it infers ++ and --", function(t) {
   const program = `var x = 1; ++x; --x; x++; x--`
   const result = tipo.check(program)
@@ -153,27 +146,8 @@ test("it infers += and -=", function(t) {
   t.strictEqual(tipo.printType(result.bindings.x), "Number")
   t.end()
 })
-test("doing += with two object types yields a String type :p", function(t) {
-  const program = `var x = {}; x += {}`
-  const result = tipo.check(program)
-  t.strictEqual(tipo.printType(result.bindings.x), "Any([Object({}), String])")
-  t.end()
-})
-test("it infers types within conditionals", function(t) {
-  const program = `
-    var x 
-    if(true) {
-      var x = 2
-    } else {
-      var x = 'hi'
-    }
-  `
-  const result = tipo.check(program)
-  t.strictEqual(tipo.printType(result.bindings.x), "Any([Undefined, Number, String])")
-  t.end()
-})
 /*
-test.only("it infers for loops", function(t) { // TODO refine test name
+test("it infers for loops", function(t) {
   const program = `
     var x = 1
     for(var y = 0; ++y; y < 10) {
@@ -188,8 +162,6 @@ test("object inference on a parameter from a property reference", function(t) {
   t.strictEqual(tipo.printType(result.bindings.fn), "Function([Object({prop: b})], b)")
   t.end()
 })
-// TODO boolean operators ===, ==, <, >, etc
-// TODO while loops
 test("it infers binary operator results to be Number types", function(t) {
   const ops = ['/', '*', '-', '%', '**']
   ops.map(function(op) {
@@ -205,6 +177,9 @@ test("it infers tvars to be Number types when they are in the arguments of a Num
   t.deepEqual(tipo.printType(result.bindings.fn), "Function([Number, Number], Number)")
   t.end()
 })
+// TODO boolean operators ===, ==, <, >, etc
+// TODO array types, strict and loose
+// TODO parameterized type aliases
 // TODO unary negation
 // TODO unary plus
 // TODO ternary conditional
@@ -255,14 +230,6 @@ test("a var bound to an explicit object gets matched correctly", function(t) {
   t.strictEqual(tipo.printType(result.bindings.x), 'Object({name: String, age: Number})')
   t.end()
 })
-test("a var bound to an explicit object type throws an error when the var's type does not match the given type", function(t) {
-  const program = `
-    //type x : Object({name: String, age: Number})
-    var x = {name: 15, age: "finn"}
-  `
-  t.throws(()=> tipo.check(program), TypeMatchError)
-  t.end()
-})
 test("Doing ++ on a string throws a type error", function(t) {
   const program = `var x = 'hi'; var y = ++x`
   t.throws(() => tipo.check(program), TypeMatchError)
@@ -290,32 +257,35 @@ test("it throws an error when binary operator are given non-Number arguments", f
   })
   t.end()
 })
-
-
-
-// -- TODO organize this
-test("comment experiments within program", function(t) {
-  const program = `
-    // type Add = Function([Number, Number], Number)
-    // type add : Add
-    var add = function(x, y) { return x + y }
-    var x = add('hi', 'there')
-  `
-  t.throws(() => tipo.check(program), TypeMatchError)
-  t.end()
-})
-test("comment experiments within require", function(t) {
-  const program = `var add = require('./test/annotated'); add('hi', 'there')`
+test("it throws a type error when you reassign the type of an existing variable", function(t) {
+  const program = `var x = 1; x = 'hi'; x = 2`
   t.throws(()=> tipo.check(program), TypeMatchError)
   t.end()
 })
-test("comment type aliasing", function(t) {
-  const program = `
-    //type Human = Object({name: String, age: Number})
-    //type x : Human
-    var x = {name: "Bob", age: 12}
-  `
-  const result = tipo.check(program)
-  t.strictEqual(tipo.printType(result.bindings.x), 'Object({name: String, age: Number})')
+test("doing += with two object types throws a type error", function(t) {
+  const program = `var x = {}; x += {}`
+  t.throws(()=> tipo.check(program), TypeMatchError)
   t.end()
 })
+test("it throws a type error when a variable is reassigned to different types in conditionals", function(t) {
+  const program = `
+    var x 
+    if(true) {
+      var x = 2
+    } else {
+      var x = 'hi'
+    }
+  `
+  t.throws(()=> tipo.check(program), TypeMatchError)
+  t.end()
+})
+test("a var bound to an explicit object type throws an error when the var's type does not match the given type", function(t) {
+  const program = `
+    //type x : Object({name: String, age: Number})
+    var x = {name: 15, age: "finn"}
+  `
+  t.throws(()=> tipo.check(program), TypeMatchError)
+  t.end()
+})
+
+// The type of a type object is: Object({name: String, params: Array

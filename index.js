@@ -9,7 +9,6 @@ const TypeMatchError = require('./lib/errors/type-match-error')
 const matchTypes = require("./lib/match-types")
 const isTvar = require("./lib/is-tvar")
 const createType = require("./lib/create-type")
-const anyType = require('./lib/any-type')
 const parseType = require('./lib/parse-type')
 
 // Print an array of error messages into something readable-ish
@@ -30,6 +29,7 @@ const createState = () => {
     bindings: defaultBindings // A mapping of variable names to Types that we have discovered/inferred
   , errors: [] // Any type errors that we find on the journey
   , meta: {tvar: 'a'} // Misc metadata to be used as we traverse the AST to keep track of stuff
+  , aliases: {} // Type aliases, eg "Human = Object({name: String, age: Number})"
   }
 }
 
@@ -94,6 +94,22 @@ const visitors = {
   }
 
 , Literal: (node, state, c) => {
+    if(typeof node.value === 'string' && node.value.indexOf("&&&&") !== -1) {
+      // This is a type declaration from a comment/string
+      const text = node.value
+      const [whole, lhs, operator, rhs] = text.match(/^(.+?)(=|:)(.+)$/)
+      if(!lhs || !rhs || !operator || (operator !== '=' && operator !== ':')) {
+        throw new SyntaxError(`Invalid type signature syntax in ${text}`)
+      }
+      const ident = lhs.replace('&&&&', '').trim()
+      const type = parseType(rhs.trim())
+      if(operator === ':') {
+        state.bindings[ident] = state.aliases[type] || type
+      } else if(operator === '=') {
+        state.aliases[ident] = type
+      }
+      return
+    }
     // A primitive value; always inferable
     state.meta.currentType = getLiteralType(node)
   }
@@ -101,17 +117,12 @@ const visitors = {
 , VariableDeclarator: (node, state, c) => {
     const name = node.id.name
     if(!node.init) {
-      if(state.bindings[name]) {
-        state.bindings[name] = anyType([state.bindings[name], 'Undefined'])
-      } else {
-        state.bindings[name] = 'Undefined'
-      }
       return
     }
     // Variable assignment
     const rtype = getType(node.init, state, c)
     if(state.bindings[name]) {
-      state.bindings[name] = anyType([state.bindings[name], rtype])
+      state.bindings[name] = matchTypes(node, rtype, state.bindings[name])
     } else {
       state.bindings[name] = rtype
     }
@@ -194,7 +205,7 @@ const visitors = {
       } else if(ltype === 'Number' && rtype === 'Number') {
         state.meta.currentType = 'Number'
       } else {
-        throw new TypeMatchError("Invalid types for '+' operator", node)
+        throw new TypeMatchError(`Invalid operand types for '+' operator: ${printType(ltype)} and ${printType(rtype)}`, node)
       }
     } else {
       // if(isTvar(ltype) && node.left.type === 'Identifier') {
@@ -275,7 +286,8 @@ const visitors = {
     // Handle non-regular, mutating assignment, like +=, -=, >>=, etc, etc
     if(node.operator === '+=' && (ltype !== 'Number' || rtype !== 'Number')) {
       // The only case where += returns a number type is if both ltype and rtype are Numbers
-      rtype = 'String' // Eg if x = 1 and you do x += {x: 1}, the result is a String :p
+      // Otherwise, the result is always a String
+      rtype = 'String'
     }
 
     // Handle object property assignment specially
@@ -298,10 +310,7 @@ const visitors = {
     }
     const existingType = state.bindings[node.left.name]
     if(existingType && existingType !== rtype) {
-      const typeParams = existingType.name === 'Any'
-        ? R.uniq(R.concat(existingType.params[0], [rtype]))
-        : [existingType, rtype]
-      state.bindings[node.left.name] = createType('Any', [typeParams])
+      state.bindings[node.left.name] = matchTypes(node, rtype, existingType)
     } else {
       state.bindings[node.left.name] = rtype
     }
@@ -313,36 +322,28 @@ const check = (program, bindings={}) => {
   var state = createState()
   state.bindings = R.merge(state.bindings, bindings)
   // onComment mutates state.bindings, adding bindings and type aliases from the comments
-  const parsed = acorn.parse(program, {onComment: onComment(state.bindings, {})})
+  const comments = []
+  acorn.parse(program, {onComment: onComment(comments)})
+  const replacedComments = R.reduce(
+    (prog, [text, start, end]) => prog.substring(0, start) + text + prog.substring(end)
+  , program
+  , comments
+  )
+  const parsed = acorn.parse(replacedComments, {})
   walk.recursive(parsed, state, visitors, walk.base)
-  // console.log(parsed.body)
-  // console.log("Bindings: ", state.bindings)
-  // console.log("Errors: ", state.errors)
-  // console.log("Scopes: ", state.scopes)
   return state
 }
 
-const onComment = (bindings, aliases) => (block, text, start, end) => {
-  if(/^\s*type/.test(text)) {
-    var exprType, lhs, rhs
-    if(/^.+=.+$/.test(text)) {
-      [lhs, rhs] = text.split(/=(.+)/)
-      exprType = 'alias'
-    } else if(/^.+:.+$/.test(text)) {
-      [lhs, rhs] = text.split(/:(.+)/)
-      exprType = 'binding'
-    }
-    if(!lhs || !rhs) {
-      throw new Error(`Invalid type signature syntax in ${text}`)
-    }
-    const ident = lhs.replace('type', '').trim()
-    const type = parseType(rhs.trim())
-    if(exprType === 'binding') {
-      bindings[ident] = aliases[type] || type
-    } else if(exprType === 'alias') {
-      aliases[ident] = type
-    }
+// replacing `//text` with `"text"` will always produce the same number of characters
+
+const onComment = (array) => (block, text, start, end) => {
+  if(!block && isTypeDec(text)) {
+    text = text.replace('type', '&&&&')
+    array.push([`"${text}"`, start, end])
   }
 }
+
+// Is the given a string a type declaration, like "type x : Number"
+const isTypeDec = text => /^\s*type/.test(text)
 
 module.exports = {check, printType, createType}
