@@ -159,6 +159,19 @@ test("doing += with two object types yields a String type :p", function(t) {
   t.strictEqual(tipo.printType(result.bindings.x), "Any([Object({}), String])")
   t.end()
 })
+test.only("it infers types within conditionals", function(t) {
+  const program = `
+    var x 
+    if(true) {
+      var x = 2
+    } else {
+      var x = 'hi'
+    }
+  `
+  const result = tipo.check(program)
+  t.strictEqual(tipo.printType(result.bindings.x), "Any([Number, String])")
+  t.end()
+})
 /*
 test.only("it infers for loops", function(t) { // TODO refine test name
   const program = `
@@ -172,10 +185,12 @@ test.only("it infers for loops", function(t) { // TODO refine test name
   t.end()
 })
 */
+// TODO boolean operators ===, ==, <, >, etc
 // TODO while loops
 // TODO conditionals
 // TODO prototypes, this, new, methods
-// TODO type variables with a rewriting system (eg Supporter -> Object)
+// TODO nested type declarations inside lexical scopes (eg in functions)
+// TODO builtin types!
 
 // Inferences with type errors
 test('it finds an error when a variable is assigned to an undefined variable', function(t) {
@@ -222,4 +237,8 @@ test("Doing ++ on a string throws a type error", function(t) {
   t.throws(() => tipo.check(program), TypeMatchError)
   t.end()
 })
-// TODO cannot += on an undefined var
+test("cannot += on an undefined var", function(t) {
+  const program = `x += 1`
+  t.throws(() => tipo.check(program), TypeMatchError)
+  t.end()
+})

@@ -10,6 +10,7 @@ const TypeMatchError = require('./lib/errors/type-match-error')
 const matchTypes = require("./lib/match-types")
 const isTvar = require("./lib/is-tvar")
 const createType = require("./lib/create-type")
+const anyType = require('./lib/any-type')
 
 // Print an array of error messages into something readable-ish
 const printErrs = R.compose(
@@ -78,19 +79,25 @@ const visitors = {
 , Literal: (node, state, c) => {
     // A primitive value; always inferable
     state.meta.currentType = getLiteralType(node)
-    return node.type
   }
 
 , VariableDeclarator: (node, state, c) => {
+    const name = node.id.name
+    if(!node.init) {
+      if(state.bindings[name]) {
+        state.bindings[name] = anyType([state.bindings[name], 'Undefined'])
+      else {
+        state.bindings[name] = 'Undefined'
+      }
+      return
+    }
     // Variable assignment
     const rtype = getType(node.init, state, c)
-    const name = node.id.name
     if(state.bindings[name]) {
-      state.bindings[name] = matchTypes(node, state.bindings[node.id.name], rtype)
+      state.bindings[name] = anyType([state.bindings[name], rtype])
     } else {
       state.bindings[name] = rtype
     }
-    return node.type
   }
 
 , FunctionExpression: (node, state, c) => {
