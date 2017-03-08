@@ -329,7 +329,7 @@ const check = (program, bindings={}) => {
   , program
   , comments
   )
-  const parsed = acorn.parse(replacedComments, {})
+  const parsed = acorn.parse(replacedComments, {locations: true})
   walk.recursive(parsed, state, visitors, walk.base)
   return state
 }

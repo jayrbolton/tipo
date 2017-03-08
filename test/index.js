@@ -177,24 +177,24 @@ test("it infers tvars to be Number types when they are in the arguments of a Num
   t.deepEqual(tipo.printType(result.bindings.fn), "Function([Number, Number], Number)")
   t.end()
 })
+// TODO unary negation and plus
 // TODO boolean operators ===, ==, <, >, etc
-// TODO array types, strict and loose
-// TODO parameterized type aliases
-// TODO unary negation
-// TODO unary plus
 // TODO ternary conditional
+// TODO const
 // TODO for loops
 // TODO while loops
-// TODO const
+// TODO array types, strict and loose
+// TODO strict/closed object types (no assignment, no extra properties)
+// TODO parameterized type aliases
 // TODO arrow functions
 // TODO prefill types for all globals!!!
 //     https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects
 // TODO prototypes, this, new, methods
-// TODO nested type declarations inside lexical scopes (eg in functions)
-// TODO strict/closed object types (no assignment, no extra properties)
-// TODO crawl files in a directory and type-check all
 // TODO fix require relative path resolution
 // TODO require on node_modules (can use require.resolve?)
+// TODO cli util - crawl files in a directory and type-check all
+//      browserify transform?
+//      linting thing (look at how eslint and such are run)
 
 // Inferences with type errors
 test('it finds an error when a variable is assigned to an undefined variable', function(t) {
