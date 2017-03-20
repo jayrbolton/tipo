@@ -10,6 +10,7 @@ const matchTypes = require("./lib/match-types")
 const isTvar = require("./lib/is-tvar")
 const createType = require("./lib/create-type")
 const parseType = require('./lib/parse-type')
+const matchAny = require("./lib/match-any")
 
 // Print an array of error messages into something readable-ish
 const printErrs = R.compose(
@@ -43,7 +44,11 @@ const getType = (node, state, c) => {
 // Get the type of a primitive literal value
 const getLiteralType = (node) => {
   const v = node.value
-  if(!isNaN(v)) {
+  if(v === null) {
+    return 'Null'
+  } else if(v === undefined) {
+    return 'Undefined'
+  } else if(typeof v === 'number') {
     return 'Number'
   } else if(typeof v === 'string') {
     return 'String'
@@ -193,6 +198,24 @@ const visitors = {
     delete typedScope
   }
 
+, UnaryExpression: (node, state, c) => {
+    const argType = getType(node.argument, state, c)
+    if(node.operator === '-') {
+      matchTypes(node, argType, 'Number')
+      state.meta.currentType = 'Number'
+    } else if(node.operator === '+') {
+      matchAny(node, argType, ['Number', 'String', 'Null', 'Boolean'])
+      state.meta.currentType = 'Number'
+    }
+  }
+
+, LogicalExpression: (node, state, c) => {
+    const ltype = getType(node.left, state, c)
+    const rtype = getType(node.right, state, c)
+    matchTypes(node, ltype, rtype)
+    state.meta.currentType = ltype
+  }
+
 , BinaryExpression: (node, state, c) => {
     const ltype = getType(node.left, state, c)
     const rtype = getType(node.right, state, c)
@@ -222,6 +245,15 @@ const visitors = {
         state.bindings[node.right.name] = 'Number'
       }
     }
+  }
+
+, ConditionalExpression: (node, state, c) => {
+    // Node has keys for 'test', 'consequent', and 'alternate', where:
+    //  test ? consequent : alternate
+    const consType = getType(node.consequent, state, c)
+    const altType = getType(node.alternate, state, c)
+    matchTypes(node, consType, altType)
+    state.meta.currentType = consType
   }
 
 , UpdateExpression: (node, state, c) => {

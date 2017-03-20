@@ -146,16 +146,6 @@ test("it infers += and -=", function(t) {
   t.strictEqual(tipo.printType(result.bindings.x), "Number")
   t.end()
 })
-/*
-test("it infers for loops", function(t) {
-  const program = `
-    var x = 1
-    for(var y = 0; ++y; y < 10) {
-      x += "hi"
-    }
-  `
-
-*/
 test("object inference on a parameter from a property reference", function(t) {
   const program = `function fn(x) { return x.prop }`
   const result = tipo.check(program)
@@ -177,15 +167,73 @@ test("it infers tvars to be Number types when they are in the arguments of a Num
   t.deepEqual(tipo.printType(result.bindings.fn), "Function([Number, Number], Number)")
   t.end()
 })
-// TODO unary negation and plus
-// TODO boolean operators ===, ==, <, >, etc
-// TODO ternary conditional
-// TODO const
-// TODO for loops
-// TODO while loops
-// TODO array types, strict and loose
+test("it infers null type", function(t) {
+  const program = `var x = null`
+  const result = tipo.check(program)
+  t.deepEqual(tipo.printType(result.bindings.x), "Null")
+  t.end()
+})
+test("unary negation and plus", function(t) {
+  const program = `var x = +(1-2); var y = -1`
+  const result = tipo.check(program)
+  t.deepEqual(tipo.printType(result.bindings.x), "Number")
+  t.deepEqual(tipo.printType(result.bindings.y), "Number")
+  t.end()
+})
+test("unary plus with non-Numbers infers to Numbers", function(t) {
+  const program = `let x = +true; let y = +'3'; let z = +null`
+  const result = tipo.check(program)
+  t.deepEqual(tipo.printType(result.bindings.x), "Number")
+  t.deepEqual(tipo.printType(result.bindings.y), "Number")
+  t.deepEqual(tipo.printType(result.bindings.z), "Number")
+  t.end()
+})
+test("it infers the type of a ternary conditional", function(t) {
+  const program = `var x = true ? 1 : 2`
+  const result = tipo.check(program)
+  t.deepEqual(tipo.printType(result.bindings.x), "Number")
+  t.end()
+})
+test("it infers logical AND as the type of the operands", function(t) {
+  const program = `var x = 1 && 2`
+  const result = tipo.check(program)
+  t.deepEqual(tipo.printType(result.bindings.x), "Number")
+  t.end()
+})
+test("it infers logical OR as the type of the operands", function(t) {
+  const program = `const x = 'hi' && 'there'`
+  const result = tipo.check(program)
+  t.deepEqual(tipo.printType(result.bindings.x), "String")
+  t.end()
+})
+test("it handles for loops", function(t) {
+  const program = `
+    var x = 0
+    for(var i = 0; i < 10; ++i) {
+      ++x
+    }
+  `
+  const result = tipo.check(program)
+  t.deepEqual(tipo.printType(result.bindings.x), 'Number')
+  t.deepEqual(tipo.printType(result.bindings.i), 'Number')
+  t.end()
+})
+test("it handles while loops", function(t) {
+  const program = `
+    var x = 0
+    while(x < 10) {
+      ++x
+    }
+  `
+  const result = tipo.check(program)
+  t.deepEqual(tipo.printType(result.bindings.x), 'Number')
+  t.end()
+})
+
 // TODO strict/closed object types (no assignment, no extra properties)
+// TODO strict/closed array types (only certain types allowed in the array)
 // TODO parameterized type aliases
+// TODO recursive type definitions
 // TODO arrow functions
 // TODO prefill types for all globals!!!
 //     https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects
@@ -287,5 +335,31 @@ test("a var bound to an explicit object type throws an error when the var's type
   t.throws(()=> tipo.check(program), TypeMatchError)
   t.end()
 })
+test("it raises type error on unary negation with a non-number", function(t) {
+  const program = `var x = -'hi'`
+  t.throws(()=> tipo.check(program), TypeMatchError)
+  t.end()
+})
+test("it raises type error on unary addition with non-number, string, boolean, or null", function(t) {
+  const program = `var x = +undefined`
+  t.throws(()=> tipo.check(program), TypeMatchError)
+  t.end()
+})
+test("results in a ternary conditional must have the same type", function(t) {
+  const program = `var x = true ? 1 : 'hi'`
+  t.throws(()=> tipo.check(program), TypeMatchError)
+  t.end()
+})
+test("the operands in a binary logical AND expression must have the same type", function(t) {
+  const program = `var y = null && undefined`
+  t.throws(()=> tipo.check(program), TypeMatchError)
+  t.end()
+})
+test("the operands in a binary logical OR expression must have the same type", function(t) {
+  const program = `var x = {} || []`
+  t.throws(()=> tipo.check(program), TypeMatchError)
+  t.end()
+})
 
-// The type of a type object is: Object({name: String, params: Array
+
+// The type of a type object is: Object({name: String, params: Array})
