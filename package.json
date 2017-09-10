@@ -7,7 +7,7 @@
     "test": "test"
   },
   "scripts": {
-    "test": "tape test/index.js | tap-spec"
+    "test": "standard index.js lib test && tape test/index.js | tap-spec"
   },
   "repository": {
     "type": "git",
@@ -29,6 +29,7 @@
     "ramda": "0.23.0"
   },
   "devDependencies": {
+    "standard": "10.0.3",
     "tap-spec": "4.1.1",
     "tape": "4.6.3"
   }

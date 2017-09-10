@@ -2,55 +2,80 @@ const R = require('ramda')
 const test = require('tape')
 const tipo = require('../')
 const TypeMatchError = require("../lib/errors/type-match-error")
-require("./type-declarations")
-require("./print-type")
-require("./parse-type")
+// require("./print-type")
+// require("./type-declarations")
+// require("./parse-type")
 //TODO parse type tests
 
 // Inference on correct programs
-test('it infers the type of a variable assignment to Number', function(t) {
-  var program = ` var x = 1 `
-  var result = tipo.check(program)
-  t.strictEqual(result.bindings.x, 'Number')
+test('it infers the type of a variable assignment to number', function(t) {
+  const program = `var x = 1`
+  const result = tipo.check(program)
+  t.strictEqual(result.bindings.x, 'number')
   t.end()
 })
-test('it infers the type of a variable assignment to String', function(t) {
-  var program = ` var x = "hi there friendo" ; 1 ; 2; 3`
-  var result = tipo.check(program)
-  t.strictEqual(result.bindings.x, 'String')
+test('it infers the type of a variable assignment to string', function(t) {
+  const program = ` var x = "hi there friendo" ; 1 ; 2; 3`
+  const result = tipo.check(program)
+  t.strictEqual(result.bindings.x, 'string')
   t.end()
 })
+
 test('it infers the type of the identity function', function(t) {
-  var program = `function id(x) { return x }`
-  var result = tipo.check(program)
-  t.strictEqual(tipo.printType(result.bindings.id), 'Function([a], a)')
+  const program = `function id(x) { return x }`
+  const result = tipo.check(program)
+  const id = result.bindings.id
+  t.deepEqual(id('number'), {type: 'function', input: ['number'], output: 'number'})
   t.end()
 })
+
+test('with a predefined function type, throws an error if wrong arg types', t => {
+  const types = `module.exports = {x: {type: 'function', input: ['number'], output: 'number'}}`
+  const program = `
+    function x (a) { return a }
+    x('hi')
+  `
+  t.throws(() => tipo.check(program, types), TypeMatchError)
+  // t.strictEqual(tipo.printType(result.bindings.z), 'string')
+  t.end()
+})
+
+test.only('with a predefined function type, throws an error if wrong arg types', t => {
+  const types = `module.exports = {x: {type: 'function', input: ['number'], output: 'string'}}`
+  const program = `function neg (n) { return -n }`
+  tipo.check(program, types)
+  t.throws(() => tipo.check(program, types), TypeMatchError)
+  // t.strictEqual(tipo.printType(result.bindings.z), 'string')
+  t.end()
+})
+
 test('it allows you to use types from the surrounding lexical scope from within a function', function(t) {
-  var program = `var y = 'hi'; function fn(x) { return x + y } ; var z = fn(1)`
-  var result = tipo.check(program)
-  t.strictEqual(tipo.printType(result.bindings.z), 'String')
+  const program = `var y = 'hi'; function fn (x) { return x + y } ; var z = fn(1)`
+  const result = tipo.check(program)
+  console.log('result', result.bindings.z)
+  // t.strictEqual(tipo.printType(result.bindings.z), 'string')
   t.end()
 })
+/*
 test('it infers an identity function call', function(t) {
-  var program = `function id(x) { return x }; var x = id(1)`
-  var result = tipo.check(program)
-  t.strictEqual(result.bindings.x, 'Number')
-  var program2 = `function id(x) { return x }; var x = id("strrring")`
-  var result2 = tipo.check(program2)
-  t.strictEqual(result2.bindings.x, 'String')
+  const program = `function id(x) { return x }; var x = id(1)`
+  const result = tipo.check(program)
+  t.strictEqual(result.bindings.x, 'number')
+  const program2 = `function id(x) { return x }; var x = id("strrring")`
+  const result2 = tipo.check(program2)
+  t.strictEqual(result2.bindings.x, 'string')
   t.end()
 })
 test('it infers addition operation', function(t) {
-  var program = `var x = 2; var y = 1 + x`
-  var result = tipo.check(program)
-  t.strictEqual(result.bindings.y, 'Number')
+  const program = `var x = 2; var y = 1 + x`
+  const result = tipo.check(program)
+  t.strictEqual(result.bindings.y, 'number')
   t.end()
 })
 test('it infers func def + assignment + operator', function(t) {
-  var program = `function id(x) { return x }; var x = id(3) + id("hi") + 1`
-  var result = tipo.check(program)
-  t.strictEqual(result.bindings.x, 'String')
+  const program = `function id(x) { return x }; var x = id(3) + id("hi") + 1`
+  const result = tipo.check(program)
+  t.strictEqual(result.bindings.x, 'string')
   t.end()
 })
 test("integration of several basic inferences", function(t) {
@@ -64,146 +89,146 @@ test("integration of several basic inferences", function(t) {
     var x = hi(1)(2)
   `
   var result = tipo.check(program)
-  t.strictEqual(result.bindings.x, 'String')
+  t.strictEqual(result.bindings.x, 'string')
   t.end()
 })
 test("it infers array types", function(t) {
   const program = `var arr = [1,2,3 + 5]`
   const result = tipo.check(program)
-  t.strictEqual(tipo.printType(result.bindings.arr), 'Array([Number, Number, Number])')
+  t.strictEqual(tipo.printType(result.bindings.arr), 'Array([number, number, number])')
   t.end()
 })
 test("it infers object types", function(t) {
   const program = `var obj = {x: 1, y: 2}`
   const result = tipo.check(program)
-  t.strictEqual(tipo.printType(result.bindings.obj), 'Object({x: Number, y: Number})')
+  t.strictEqual(tipo.printType(result.bindings.obj), 'Object({x: number, y: number})')
   t.end()
 })
 test('it infers nested objs', function(t) {
   const program = `var obj = {x: 1, y: {z: [1,2]}}`
   const result = tipo.check(program)
-  t.strictEqual(tipo.printType(result.bindings.obj), 'Object({x: Number, y: Object({z: Array([Number, Number])})})')
+  t.strictEqual(tipo.printType(result.bindings.obj), 'Object({x: number, y: Object({z: Array([number, number])})})')
   t.end()
 })
 test("it infers object properties", function(t) {
   const program = `var obj = {x: 1}; var x = obj.x`
   const result = tipo.check(program)
-  t.strictEqual(tipo.printType(result.bindings.x), 'Number')
+  t.strictEqual(tipo.printType(result.bindings.x), 'number')
   t.end()
 })
 test("it infers object assignment", function(t) {
   const program = `var obj = {}; obj.x = 1`
   const result = tipo.check(program)
-  t.strictEqual(tipo.printType(result.bindings.obj), 'Object({x: Number})')
+  t.strictEqual(tipo.printType(result.bindings.obj), 'Object({x: number})')
   t.end()
 })
 test("it parses require statements", function(t) {
   const program = `var x = require('./test/wut.js')`
   const result = tipo.check(program)
-  t.strictEqual(tipo.printType(result.bindings.x), 'String')
+  t.strictEqual(tipo.printType(result.bindings.x), 'string')
   t.end()
 })
 test("it can infer anonymous function types", function(t) {
   const program = `var id = function(x) { return x }`
   const result = tipo.check(program)
-  t.strictEqual(tipo.printType(result.bindings.id), "Function([a], a)")
+  t.strictEqual(tipo.printType(result.bindings.id), "function([a], a)")
   t.end()
 })
 test("it infers types of functions that return functions", function(t) {
   const program = `var fn = function(x) { return function() { return x}}`
   const result = tipo.check(program)
-  t.strictEqual(tipo.printType(result.bindings.fn), "Function([a], Function([], a))")
+  t.strictEqual(tipo.printType(result.bindings.fn), "function([a], function([], a))")
   t.end()
 })
 test("it infers double calls on the same function", function(t) {
   const program = `var fn = function(x) { return function() { return x}}; var x = fn(1)()`
   const result = tipo.check(program)
-  t.strictEqual(tipo.printType(result.bindings.x), "Number")
+  t.strictEqual(tipo.printType(result.bindings.x), "number")
   t.end()
 })
 test("it allows for partial application", function(t) {
   const program = `var fn = function(x) { return function(){ return x }}; var fn1 = fn(1); var x = fn1()`
   const result = tipo.check(program)
-  t.strictEqual(tipo.printType(result.bindings.fn1), "Function([], Number)")
-  t.strictEqual(result.bindings.x, "Number")
+  t.strictEqual(tipo.printType(result.bindings.fn1), "function([], number)")
+  t.strictEqual(result.bindings.x, "number")
   t.end()
 })
 test("it infers function within object properties", function(t) {
   const program = `var obj = {fn: function(x) { return x }}; obj.y = obj.fn(2)`
   const result = tipo.check(program)
-  t.strictEqual(tipo.printType(result.bindings.obj), 'Object({fn: Function([a], a), y: Number})')
+  t.strictEqual(tipo.printType(result.bindings.obj), 'Object({fn: function([a], a), y: number})')
   t.end()
 })
 test("it infers ++ and --", function(t) {
   const program = `var x = 1; ++x; --x; x++; x--`
   const result = tipo.check(program)
-  t.strictEqual(tipo.printType(result.bindings.x), "Number")
+  t.strictEqual(tipo.printType(result.bindings.x), "number")
   t.end()
 })
 test("it infers += and -=", function(t) {
   const program = `var x = 1; x += 1; x -=1`
   const result = tipo.check(program)
-  t.strictEqual(tipo.printType(result.bindings.x), "Number")
+  t.strictEqual(tipo.printType(result.bindings.x), "number")
   t.end()
 })
 test("object inference on a parameter from a property reference", function(t) {
   const program = `function fn(x) { return x.prop }`
   const result = tipo.check(program)
-  t.strictEqual(tipo.printType(result.bindings.fn), "Function([Object({prop: b})], b)")
+  t.strictEqual(tipo.printType(result.bindings.fn), "function([Object({prop: b})], b)")
   t.end()
 })
-test("it infers binary operator results to be Number types", function(t) {
+test("it infers binary operator results to be number types", function(t) {
   const ops = ['/', '*', '-', '%', '**']
   ops.map(function(op) {
     const result = tipo.check(`var x = 1 ${op} 1`)
-    t.strictEqual(result.bindings.x, 'Number')
+    t.strictEqual(result.bindings.x, 'number')
   })
   t.end()
 })
-test("it infers tvars to be Number types when they are in the arguments of a Number binary operator", function(t) {
+test("it infers tvars to be number types when they are in the arguments of a number binary operator", function(t) {
   const op = '/'
   const program = `function fn(x, y) { return x ${op} y}`
   const result = tipo.check(program)
-  t.deepEqual(tipo.printType(result.bindings.fn), "Function([Number, Number], Number)")
+  t.deepEqual(tipo.printType(result.bindings.fn), "function([number, number], number)")
   t.end()
 })
 test("it infers null type", function(t) {
   const program = `var x = null`
   const result = tipo.check(program)
-  t.deepEqual(tipo.printType(result.bindings.x), "Null")
+  t.deepEqual(tipo.printType(result.bindings.x), "null")
   t.end()
 })
 test("unary negation and plus", function(t) {
   const program = `var x = +(1-2); var y = -1`
   const result = tipo.check(program)
-  t.deepEqual(tipo.printType(result.bindings.x), "Number")
-  t.deepEqual(tipo.printType(result.bindings.y), "Number")
+  t.deepEqual(tipo.printType(result.bindings.x), "number")
+  t.deepEqual(tipo.printType(result.bindings.y), "number")
   t.end()
 })
-test("unary plus with non-Numbers infers to Numbers", function(t) {
+test("unary plus with non-number infers to number", function(t) {
   const program = `let x = +true; let y = +'3'; let z = +null`
   const result = tipo.check(program)
-  t.deepEqual(tipo.printType(result.bindings.x), "Number")
-  t.deepEqual(tipo.printType(result.bindings.y), "Number")
-  t.deepEqual(tipo.printType(result.bindings.z), "Number")
+  t.deepEqual(tipo.printType(result.bindings.x), "number")
+  t.deepEqual(tipo.printType(result.bindings.y), "number")
+  t.deepEqual(tipo.printType(result.bindings.z), "number")
   t.end()
 })
 test("it infers the type of a ternary conditional", function(t) {
   const program = `var x = true ? 1 : 2`
   const result = tipo.check(program)
-  t.deepEqual(tipo.printType(result.bindings.x), "Number")
+  t.deepEqual(tipo.printType(result.bindings.x), "number")
   t.end()
 })
 test("it infers logical AND as the type of the operands", function(t) {
   const program = `var x = 1 && 2`
   const result = tipo.check(program)
-  t.deepEqual(tipo.printType(result.bindings.x), "Number")
+  t.deepEqual(tipo.printType(result.bindings.x), "number")
   t.end()
 })
 test("it infers logical OR as the type of the operands", function(t) {
   const program = `const x = 'hi' && 'there'`
   const result = tipo.check(program)
-  t.deepEqual(tipo.printType(result.bindings.x), "String")
+  t.deepEqual(tipo.printType(result.bindings.x), "string")
   t.end()
 })
 test("it handles for loops", function(t) {
@@ -214,8 +239,8 @@ test("it handles for loops", function(t) {
     }
   `
   const result = tipo.check(program)
-  t.deepEqual(tipo.printType(result.bindings.x), 'Number')
-  t.deepEqual(tipo.printType(result.bindings.i), 'Number')
+  t.deepEqual(tipo.printType(result.bindings.x), 'number')
+  t.deepEqual(tipo.printType(result.bindings.i), 'number')
   t.end()
 })
 test("it handles while loops", function(t) {
@@ -226,16 +251,72 @@ test("it handles while loops", function(t) {
     }
   `
   const result = tipo.check(program)
-  t.deepEqual(tipo.printType(result.bindings.x), 'Number')
+  t.deepEqual(tipo.printType(result.bindings.x), 'number')
   t.end()
 })
 
-// TODO strict/closed object types (no assignment, no extra properties)
-// TODO strict/closed array types (only certain types allowed in the array)
-// TODO parameterized type aliases
-// TODO recursive type definitions
-// TODO arrow functions
-// TODO prefill types for all globals!!!
+// Predefined types
+test('it allows you to specify object types', t => {
+  const program = ` const obj = {x: 1, y: 'hi'} `
+  const types = ` module.exports = { obj: {x: 'number', y: 'string'} } `
+  const result = tipo.check(program, types)
+  t.deepEqual(result.bindings.obj, {x: 'number', y: 'string'})
+  t.end()
+})
+
+test('predefined nested object types', t => {
+  const types = `
+    const point = {x: 'number', y: 'number'}
+    const circle = {p: point, radius: 'number'}
+    module.exports = {circ: circle}
+  `
+  const program = `
+    const circ = {p: {x: 0, y: 0}, radius: 12}
+  `
+  const result = tipo.check(program, types)
+  t.deepEqual(result.bindings.circ, {p: {x: 'number', y: 'number'}, radius: 'number'})
+  t.end()
+})
+
+test('predefined parameterized types', t => {
+  const types = `
+    const Node = t => ({value: t, next: () => [Node(t), 'null'] })
+    const List = t => ({length: 'number', head: [Node(t), 'null'], last: [Node(t), 'null']})
+    module.exports = {
+      l1: List('number'),
+      l2: List('string')
+    }
+  `
+  const program = `
+    const n1b = {value: 44, next: null}
+    const n1a = {value: 33, next: n1b}
+    const n1 = {value: 22, next: n1a}
+    const l1 = {length: 3, head: n1, last: n1b}
+    const n2 = {value: 'hi', next: null}
+    const l2 = {length: 1, head: n2, last: n2}
+  `
+  const result = tipo.check(program, types)
+  t.deepEqual(result.bindings.l1, {
+    length: 'number',
+    head: {value: 'number', next: {value: 'number', next: {value: 'number', next: 'null'}}},
+    last: {value: 'number', next: 'null'}
+  })
+  t.deepEqual(result.bindings.l2, {
+    length: 'number',
+    head: {value: 'string', next: 'null'},
+    last: {value: 'string', next: 'null'}
+  })
+  const program2 = `
+    const n1 = {value: 1, next: n2}
+    const n2 = {value: '1', next: n3}
+    const n3 = {value: 1, next: null}
+    const l1 = {length: 2, head: n1, last: n3}
+  `
+  t.throws(() => tipo.check(program2, types), TypeMatchError)
+  t.end()
+})
+
+// TODO prefill types for all globals
 //     https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects
 // TODO prototypes, this, new, methods
 // TODO fix require relative path resolution
@@ -246,36 +327,36 @@ test("it handles while loops", function(t) {
 
 // Inferences with type errors
 test('it finds an error when a variable is assigned to an undefined variable', function(t) {
-  var program = ` var x = y `
+  const program = ` var x = y `
   t.throws(()=> tipo.check(program), TypeMatchError)
   t.end()
 })
 test("it finds an error for undefined function calls", function(t) {
-  var program = `what('hi')`
+  const program = `what('hi')`
   t.throws(()=> tipo.check(program), TypeMatchError)
   t.end()
 })
 test("it finds an error when trying to call a non-function", function(t) {
-  var program = `var x = 1; x(2)`
+  const program = `var x = 1; x(2)`
   t.throws(()=> tipo.check(program), TypeMatchError)
   t.end()
 })
-test("it finds an error when calling a function with the wrong type argument", function(t) {
+test.skip("it finds an error when calling a function with the wrong type argument", function(t) {
   const program = `
-    //type incr : Function([Number], Number)
+    //type incr : function([number], number)
     var incr = function(n) { return n + 1 }
     incr('hi')
   `
   t.throws(()=> tipo.check(program), TypeMatchError)
   t.end()
 })
-test("a var bound to an explicit object gets matched correctly", function(t) {
+test.skip("a var bound to an explicit object gets matched correctly", function(t) {
   const program = `
-    //type x : Object({name: String, age: Number})
+    //type x : Object({name: string, age: number})
     var x = {name: "Finn", age: 16}
   `
   const result = tipo.check(program)
-  t.strictEqual(tipo.printType(result.bindings.x), 'Object({name: String, age: Number})')
+  t.strictEqual(tipo.printType(result.bindings.x), 'Object({name: string, age: number})')
   t.end()
 })
 test("Doing ++ on a string throws a type error", function(t) {
@@ -298,7 +379,7 @@ test("Passing in an object with a property of the wrong type to a function that 
   t.throws(()=> tipo.check(program), TypeMatchError)
   t.end()
 })
-test("it throws an error when binary operator are given non-Number arguments", function(t) {
+test("it throws an error when binary operator are given non-number arguments", function(t) {
   const ops = ['/', '*', '-', '%', '**']
   ops.map(function(op) {
     t.throws(() => tipo.check(`var x = 1 ${op} 'hi'`), TypeMatchError)
@@ -327,9 +408,9 @@ test("it throws a type error when a variable is reassigned to different types in
   t.throws(()=> tipo.check(program), TypeMatchError)
   t.end()
 })
-test("a var bound to an explicit object type throws an error when the var's type does not match the given type", function(t) {
+test.skip("a var bound to an explicit object type throws an error when the var's type does not match the given type", function(t) {
   const program = `
-    //type x : Object({name: String, age: Number})
+    //type x : Object({name: string, age: number})
     var x = {name: 15, age: "finn"}
   `
   t.throws(()=> tipo.check(program), TypeMatchError)
@@ -362,4 +443,4 @@ test("the operands in a binary logical OR expression must have the same type", f
 })
 
 
-// The type of a type object is: Object({name: String, params: Array})
+*/
