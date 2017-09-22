@@ -1,29 +1,24 @@
-const {createType, types} = require('../lib/types')
+const T = require('../lib/types')
 const checkModule = require('../lib/checkModule')
 
-const BTree = t => types.Obj({
-  type: types.value('BTree'),
-  childCount: t,
-  left: types.Any([types.Null(), t]), // , BTree(t) TODO
-  right: types.Any([types.Null(), t])
+const BTree = valType => T.Obj({
+  type: T.value('BTree'),
+  childCount: T.Num(),
+  left: T.Any([T.Null(), valType]), // , BTree(t) TODO
+  right: T.Any([T.Null(), valType])
 })
 
-const a = types.Var('a')
-const node = types.Func({
+const node = T.Func(a => ({
   input: [a, a],
-  output: a
-})
+  output: BTree(a)
+}))
 
-const c = types.Var('c')
 const typeset = {
-  node: types.Func({
-    input: [c, c],
-    output: BTree(c)
-  })
+  node: node
 }
 
 checkModule('./examples/btree.js', typeset, (state) => {
-  console.log('done', state.types)
+  console.log('done', JSON.stringify(state, null, 2))
 })
 
 /*
