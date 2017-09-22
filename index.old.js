@@ -180,7 +180,6 @@ const visitors = {
     // Create an array of pairs of [argumentType, paramType]
     // eg [['number', 'a'], ['string', 'b']]
     const typePairs = R.zip(argTypes, type.input)
-    console.log('pairs', typePairs)
     // If any argument types do not match parameter types, throw an err
     typePairs.map(([a, b]) => matchTypes(node, a, b))
     return type
@@ -354,4 +353,4 @@ function check (program, typeCode = '') {
   return state
 }
 
-module.exports = {check, printType, createType}
+module.exports = {assertType, check, printType, createType}
